@@ -1,0 +1,15 @@
+# Salidas de simulación
+*.dump
+*.vtk
+*.csv
+*.log
+
+# Contenedores de Apptainer
+*.sif
+
+# Entornos y temporales de Python
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+datos_simulaciones/
