@@ -128,7 +128,7 @@ if __name__ == "__main__":
     # =========================================================================
     # ¡MODIFICA ESTAS VARIABLES PARA ELEGIR QUÉ GRAFICAR!
     # =========================================================================
-    CARPETA_SIMULACION = "/home/juli/lab/project/sim-binary-shapes-2d/datos_simulaciones/simulation_data/R_2.0/TIRADA2/BARRIDO_2D_DISK_TRIANGLE/Chi_0p2_W_2p0" 
-    ID_DEL_ATASCO = "00028" 
+    CARPETA_SIMULACION = "/home/juli/lab/project/sim-binary-shapes-2d/datos_simulaciones/simulation_data/R_2.0/TIRADA2/BARRIDO_2D_SQUARE_SQUARE/Chi_0p1_W_2p0" 
+    ID_DEL_ATASCO = "00044" 
     
     graficar_fuerza_especifica(CARPETA_SIMULACION, ID_DEL_ATASCO)

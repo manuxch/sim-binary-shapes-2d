@@ -57,28 +57,44 @@ def main(av_path="../processed_data/1_avalanche_data/resultados_completos_esquel
     out_dir = "../processed_data/1_avalanche_data"
     os.makedirs(out_dir, exist_ok=True)
     
-    # Guardamos el archivo CSV con la información procesada
+    # Guardamos el archivo CSV con la información procesada (ESTO GUARDA TODO)
     output_csv = os.path.join(out_dir, "datos_curvas_atascamiento.csv")
     stats.to_csv(output_csv, index=False)
     print(f"Datos exportados correctamente a: {output_csv}")
     # ---------------------------------------
 
+    # --- NUEVO BLOQUE: FILTRO PARA EL GRÁFICO ---
+    # Identificamos las filas exactas que queremos excluir
+    # En este caso: Disco-Disco y Cuadrado-Disco con chi de 0.4 o mayor
+    # filas_a_excluir = (
+    #     ((stats['sistema'] == 'Disco(G)-Disco(C)') & (stats['chi'] >= 0.4)) |
+    #     ((stats['sistema'] == 'Cuadrado(G)-Disco(C)') & (stats['chi'] >= 0.4))
+    # )
+    
+    # Creamos un nuevo DataFrame para graficar, negando la condición con el símbolo '~'
+    # stats_grafico = stats[~filas_a_excluir]
+    stats_grafico = stats
+    # --------------------------------------------
+
     # Graficamos curvas separadas
     plt.figure(figsize=(10, 7))
-    for sis in stats['sistema'].unique():
-        data_sis = stats[stats['sistema'] == sis]
+    
+    # IMPORTANTE: A partir de acá usamos stats_grafico en lugar de stats
+    for sis in stats_grafico['sistema'].unique():
+        data_sis = stats_grafico[stats_grafico['sistema'] == sis]
+        
         # Ordenamos por chi para que la línea no se cruce
         data_sis = data_sis.sort_values('chi')
         
-        # Usamos errorbar en lugar de plot para graficar con el error calculado
+        # Usamos errorbar para graficar con el error calculado
         plt.errorbar(
             x=data_sis['chi'], 
             y=data_sis['y_log'], 
             yerr=data_sis['y_log_err'], 
-            fmt='o-',          # Marcadores circulares unidos por línea
-            capsize=4,         # Topes horizontales en la barra de error
-            capthick=1.5,      # Grosor de los topes
-            elinewidth=1.5,    # Grosor de la línea de error
+            fmt='o-',          
+            capsize=4,         
+            capthick=1.5,      
+            elinewidth=1.5,    
             label=sis
         )
 
@@ -89,7 +105,7 @@ def main(av_path="../processed_data/1_avalanche_data/resultados_completos_esquel
     plt.grid(True, linestyle='--', alpha=0.6)
     
     # Guardamos la imagen
-    out_img = "analisis_atascamiento_comparativo.jpg"
+    out_img = os.path.join(out_dir, "analisis_atascamiento_comparativo.jpg")
     plt.savefig(out_img, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Gráfico exportado correctamente a: {out_img}")
