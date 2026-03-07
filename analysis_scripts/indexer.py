@@ -3,17 +3,23 @@ import pandas as pd
 import hashlib
 import json
 import re
+import numpy as np
 
 # --- CONFIGURACIÓN ---
-# Esta ruta se mantiene como la original de tu entorno
 ROOT_DIR = "../datos_simulaciones/simulation_data/R_2.0"
 
-def parse_params(filepath):
-    """
-    Lee params.in manejando el bloque de granos y variables clave-valor.
-    Mantiene TODA la lógica original de detección de polígonos y placeholders.
-    """
-    params = {}
+def calcular_area_geometrica(r, sides):
+    """Calcula el área real según la forma de la partícula."""
+    if sides == 1:   # DISCO
+        return np.pi * (r ** 2)
+    if sides == 4:   # CUADRADO
+        return 4.0 * (r ** 2) 
+    if sides > 1:    # POLÍGONOS REGULARES
+        return (sides * (r ** 2) * np.sin(2 * np.pi / sides)) / 2
+    return np.pi * (r ** 2)
+
+def parse_params(filepath, folder_path):
+    params = {'chi': None}
     grain_defs = []
     reading_grains = False
     grains_to_read = 0
@@ -21,135 +27,97 @@ def parse_params(filepath):
     try:
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
-                raw_line = line.strip()
-                line = raw_line.split('#')[0].strip() # Quitar comentarios
+                line = line.split('#')[0].strip()
                 if not line: continue
 
-                # 1. Detectar Bloque de Granos (no tiene ':', son números en fila)
                 if reading_grains and grains_to_read > 0:
-                    # Formato: [noGranos radio nLados dens fric rest]
                     parts = line.split()
                     if len(parts) >= 6:
-                        try:
-                            g_def = {
-                                'count': int(parts[0]),
-                                'radius': float(parts[1]),
-                                'sides': int(parts[2]), # 1=Disco, >1=Poligono
-                                'friction': float(parts[4])
-                            }
-                            grain_defs.append(g_def)
-                            grains_to_read -= 1
-                        except ValueError:
-                            pass # Saltar lineas malformadas
-                    if grains_to_read == 0:
-                        reading_grains = False
+                        grain_defs.append({
+                            'radius': float(parts[1]),
+                            'sides': int(parts[2])
+                        })
+                        grains_to_read -= 1
                     continue
 
-                # 2. Detectar Clave : Valor
                 if ':' in line:
                     parts = line.split(':')
-                    key = parts[0].strip()
-                    val_str = parts[1].strip()
-                    
-                    # Limpiar placeholders si existen (ej: @RHOLE@)
-                    # Si detecta un @, descarta el archivo (es un template, no una simulación)
-                    if '@' in val_str:
-                        return None 
+                    key_raw, val_str = parts[0].strip(), parts[1].strip()
+                    if '@' in val_str: return None 
 
-                    # Convertir a numero de forma segura (int o float)
                     try:
-                        if '.' in val_str or 'e' in val_str.lower():
-                            val = float(val_str)
-                        else:
-                            val = int(val_str)
-                    except ValueError:
-                        val = val_str # Queda como texto (T/F, nombres)
+                        val = float(val_str) if ('.' in val_str or 'e' in val_str.lower()) else int(val_str)
+                    except: val = val_str
                     
-                    params[key] = val
+                    key_norm = key_raw.lower().replace(" ", "_")
+                    if key_norm in ['concentracion_aditivo', 'chi']:
+                        params['chi'] = val
+                    else:
+                        params[key_raw] = val
 
-                    # Activar lectura de granos si encontramos la llave exacta
-                    if key == 'noTipoGranos':
-                        reading_grains = True
-                        grains_to_read = int(val)
+                    if key_norm == 'notipogranos':
+                        reading_grains, grains_to_read = True, int(val)
 
-        # --- Lógica de Clasificación de Sistema ---
-        if not grain_defs:
-            return None # Archivo inválido o sin granos definidos
+        # Fallback de Chi
+        if params['chi'] is None:
+            match = re.search(r"Chi_(\d+[p\.]\d+)", folder_path)
+            params['chi'] = float(match.group(1).replace('p', '.')) if match else 0.0
 
-        # Determinar tipo de sistema según los lados de las partículas
-        sides = [g['sides'] for g in grain_defs]
-        if all(s == 1 for s in sides):
-            sys_type = "Discos"
-        elif all(s > 1 for s in sides):
-            sys_type = "Poligonos"
+        if not grain_defs: return None
+
+        # --- Lógica de Radios y Áreas ---
+        gs = sorted(grain_defs, key=lambda x: x['radius'], reverse=True)
+        params['r_large'] = gs[0]['radius']
+        params['area_large'] = round(calcular_area_geometrica(gs[0]['radius'], gs[0]['sides']), 4)
+        
+        if len(gs) >= 2:
+            params['r_small'] = gs[1]['radius']
+            params['r_ratio'] = round(gs[1]['radius'] / gs[0]['radius'], 2)
+            
+            # Cálculo de Áreas
+            params['area_small'] = round(calcular_area_geometrica(gs[1]['radius'], gs[1]['sides']), 4)
+            params['area_ratio'] = round(params['area_small'] / params['area_large'], 4)
+            
+            nombres = {1: "Disco", 3: "Tri", 4: "Cuad", 5: "Pent"}
+            n1 = nombres.get(gs[0]['sides'], "Pol") # Si el numero de lados es mayor a 5, se usa "Pol"
+            n2 = nombres.get(gs[1]['sides'], "Pol")
+            params['system_type'] = f"{n1}-{n2}"
         else:
-            sys_type = "Mezcla"
-        
-        # Guardar info resumida para el DataFrame
-        params['system_type'] = sys_type
-        params['grain_json'] = json.dumps(grain_defs)
-        params['total_particles'] = sum(g['count'] for g in grain_defs)
-        
-        return params
+            params['r_ratio'] = 1.0
+            params['system_type'] = "Puro"
 
+        params['grain_json'] = json.dumps(grain_defs)
+        return params
     except Exception as e:
-        # En caso de error de lectura, devolvemos None para no romper el loop
+        # Imprime el error para debuguear si alguna carpeta falla
+        print(f"Error en {folder_path}: {e}")
         return None
 
 def generate_hash(params):
-    """Genera ID único basado en física (ignora tiradas y semillas)"""
-    # Claves a ignorar para que TIRADA1, 2 y 3 tengan el mismo Hash si la física es igual
-    ignore = ['RandomSeed', 'dirID', 'preFrameFile', 'fluxFile', 'veFile', 'path', 'tirada']
-    clean = {k: v for k, v in params.items() if k not in ignore}
-    s = json.dumps(clean, sort_keys=True)
-    return hashlib.md5(s.encode()).hexdigest()[:8]
+    keys = ['grain_json', 'Radio_salida', 'chi', 'Radio_silo']
+    s = "|".join([str(params.get(k, "")) for k in keys])
+    return hashlib.md5(s.encode()).hexdigest()[:12]
 
 def main(base_dir=ROOT_DIR):
-    """
-    Función principal que escanea el directorio y genera el master_sim_index.csv.
-    """
-    print(f"Escaneando {base_dir} ...")
+    print(f"Indexando en: {base_dir}")
     data = []
-    
     for root, dirs, files in os.walk(base_dir):
         if "params.in" in files:
-            path = os.path.join(root, "params.in")
-            p = parse_params(path)
-            
+            p = parse_params(os.path.join(root, "params.in"), root)
             if p:
-                # Lógica original para detectar la Tirada según el nombre de la carpeta
-                if "TIRADA1" in root: t = 1
-                elif "TIRADA2" in root: t = 2
-                elif "TIRADA3" in root: t = 3
-                else: t = 0
-                
-                p['tirada'] = t
+                t_match = re.search(r'TIRADA(\d+)', root, re.IGNORECASE)
+                p['tirada'] = int(t_match.group(1)) if t_match else 0
                 p['path'] = root
                 p['sim_hash'] = generate_hash(p)
                 data.append(p)
 
-    if not data:
-        print("No se encontraron simulaciones válidas.")
-        return
-
+    if not data: return print("No se encontraron datos.")
     df = pd.DataFrame(data)
-    
-    # Reordenar columnas visualmente importantes (Lógica Original)
-    first_cols = ['sim_hash', 'tirada', 'system_type', 'Radio_salida', 'Radio_silo', 'path']
-    cols = first_cols + [c for c in df.columns if c not in first_cols]
-    df = df[cols]
-    
-    csv_name = "../master_sim_index.csv"
-    df.to_csv(csv_name, index=False)
-    
-    # Resumen final por consola
-    print(f"\n--- ÉXITO ---")
-    print(f"Base de datos generada: {csv_name}")
-    print(f"Simulaciones encontradas: {len(df)}")
-    print(f"Grupos físicos únicos: {df['sim_hash'].nunique()}")
-    print("\nEjemplo de datos indexados:")
-    print(df[['sim_hash', 'system_type', 'Radio_salida', 'tirada']].head())
+    cols_prioritarias = ['sim_hash', 'system_type', 'chi', 'r_ratio', 'area_ratio', 'tirada', 'path']
+    existentes = [c for c in cols_prioritarias if c in df.columns]
+    df = df[existentes + [c for c in df.columns if c not in existentes]]
+    df.to_csv("../master_sim_index.csv", index=False)
+    print(f"Éxito: {len(df)} simulaciones indexadas.")
 
-# El bloque de seguridad: permite que el script se use solo o sea importado
 if __name__ == "__main__":
     main()

@@ -1,108 +1,113 @@
 import os
-import pandas as pd
-import json
+import shutil
 
-# Importamos tus scripts corregidos
+# --- Módulos  ---
 import indexer
 import processor
-import plot_profiles
+# import plot_profiles
 import flow_analysis
 import tail_distribution_chi
 import density_map
-import shutil
 import temporal_chi
-#import wall_chi_variation
-#import plot_wall_chi
+# import wall_chi_variation
+# import plot_wall_chi
+import generar_csv_arcos
+import arch_consolidator
+import histogram_arch
 
 def main():
     print("="*60)
-    print("   PIPELINE DE ANÁLISIS MEJORADO   ")
+    print("   PIPELINE DE ANÁLISIS MEJORADO Y ARCOS   ")
     print("="*60)
 
+    # ==========================================================
     # 1. INDEXACIÓN: Crea la base de datos maestra
+    # ==========================================================
     indexer.main()
-    if not os.path.exists("../master_sim_index.csv"):
+    idx_path = "../master_sim_index.csv"
+    if not os.path.exists(idx_path):
         print("[-] Error: No se pudo generar el índice. Abortando.")
         return
 
+    # ==========================================================
     # 2. PROCESAMIENTO: Genera NPZ y el CSV global de avalanchas
-    # (Este ya guarda los datos en 0_mapa_prepro y 1_avalanche_data)
+    # ==========================================================
     processor.main()
 
-    # 3. ANÁLISIS ESTADÍSTICO (Versiones corregidas que separan por sistema)
-    print("\n[+] Ejecutando análisis estadístico por tipo de partícula...")
+    # ==========================================================
+    # 3. ANÁLISIS DE ARCOS ESPACIALES (NUEVO)
+    # ==========================================================
+    print("\n[+] Extrayendo estadísticas espaciales de los arcos...")
+    df_idx = pd.read_csv(idx_path)
     
-    # Genera las curvas ln(S+1) comparativas (Disco-Disco vs Disco-Cuadrado)
+    # a. Generar micro-csvs de arcos localmente en cada simulación
+    for index, row in df_idx.iterrows():
+        sim_path = row.get('path', '')
+        if os.path.exists(sim_path):
+            print(f"  -> Buscando arcos en {row.get('sim_hash', 'unk')}...", end='\r')
+            generar_csv_arcos.procesar_directorio(sim_path)
+    print("\n  -> Extracción de arcos local finalizada.")
+
+    # b. Consolidar todos los micro-csv en un Mega Dataset
+    exito_cons = arch_consolidator.consolidate_arcs(idx_path=idx_path)
+    
+    # c. Generar los histogramas usando el Mega Dataset
+    if exito_cons:
+        histogram_arch.plot_arch_histograms()
+
+    # ==========================================================
+    # 4. ANÁLISIS ESTADÍSTICO TRADICIONAL
+    # ==========================================================
+    print("\n[+] Ejecutando análisis estadístico global de flujo y avalanchas...")
+    
+    # Podés modificar fixed_val y target_system desde acá mismo
     flow_analysis.main(
+        mode='ratio_sweep',
+        fixed_val=0.01,
+        normalize=True,
+        target_system='Disco(G)-Disco(C)',  # <- Elegir el sistema (o poné None para ver todos)
         av_path="../processed_data/1_avalanche_data/resultados_completos_esqueleto.csv",
-        idx_path="../master_sim_index.csv"
+        idx_path=idx_path
     )
     
-    # Genera los gráficos de colas de distribución (uno para cada sistema)
     tail_distribution_chi.main(
         av_path="../processed_data/1_avalanche_data/resultados_completos_esqueleto.csv",
-        idx_path="../master_sim_index.csv"
+        idx_path=idx_path
     )
-
-    # 4. MAPAS Y PERFILES: Loop detallado por simulación
-    print("\n[+] Generando mapas visuales y perfiles transversales...")
-    df_idx = pd.read_csv("../master_sim_index.csv")
+    # ==========================================================
+    # 5. MAPAS ESPACIALES Y PERFILES
+    # ==========================================================
+    print("\n[+] Generando mapas espaciales y perfiles de flujo...")
+    temporal_chi.main()
     
-    for _, row in df_idx.iterrows():
+    for index, row in df_idx.iterrows():
         s_hash = row['sim_hash']
-        t = row['tirada']
+        t = row.get('tirada', 0)
         
-        # Obtenemos la identificación exacta del sistema para el nombre del archivo
-        # Reutilizamos la lógica del indexer para saber qué mezcla es
-        try:
-            grains = json.loads(row['grain_json'])
-            grains_sorted = sorted(grains, key=lambda x: x['radius'], reverse=True)
-            big_name = "Disco" if grains_sorted[0]['sides'] == 1 else "Cuad"
-            small_name = "Disco" if grains_sorted[1]['sides'] == 1 else "Cuad"
-            sistema_id = f"{big_name}_G-{small_name}_C"
-        except:
-            sistema_id = "Desconocido"
-
-        # Buscamos el archivo de datos espaciales
         npz_file = f"0_mapa_prepro/mapas_{s_hash}_T{t}.npz"
         
         if os.path.exists(npz_file):
-            print(f" > Procesando {sistema_id} | Hash: {s_hash} (T{t})")
-            
-            # Extraemos el Chi de la fila para que los mapas tengan la escala correcta
-            # Intentamos obtenerlo de la columna 'chi', si no, de la ruta
             chi_val = row.get('chi', 0.1) 
-
-            # A. Perfiles transversales
-            plot_profiles.plot_perfil_horizontal(npz_file, altura_y=10)
-            
-            # C. Mapas de Segregación
+            # plot_profiles.plot_perfil_horizontal(npz_file, altura_y=10) # Comentado si no lo pasaste
             density_map.plot_segregation_analysis(npz_file, chi_global=chi_val)
-        else:
-            print(f" [!] No se encontró el .npz para {s_hash}")
 
-
-    # 5. LIMPIEZA DE ARCHIVOS TEMPORALES
+    # ==========================================================
+    # 6. LIMPIEZA DE ARCHIVOS TEMPORALES
+    # ==========================================================
     print("\n[+] Limpiando archivos temporales...")
     temp_folder = "0_mapa_prepro"
-    
     if os.path.exists(temp_folder):
         try:
-            shutil.rmtree(temp_folder) # Borra la carpeta y todo su contenido
+            shutil.rmtree(temp_folder)
             print(f" [-] Carpeta '{temp_folder}' eliminada correctamente.")
         except Exception as e:
             print(f" [!] Error al intentar borrar '{temp_folder}': {e}")
-    else:
-        print(f" [.] La carpeta '{temp_folder}' ya no existe.")
-
-
-    temporal_chi.main()
-    #wall_chi_variation.main()
-    #plot_wall_chi.main()
-
-    print("\n" + "="*60)
-    print("   ANÁLISIS COMPLETADO   ")
-    print("="*60)
+            
+    print("\n[+] PIPELINE COMPLETADO EXITOSAMENTE.")
 
 if __name__ == "__main__":
+    # Importante para multiprocesamiento local en windows/mac
+    import multiprocessing
+    multiprocessing.freeze_support()
+    import pandas as pd
     main()

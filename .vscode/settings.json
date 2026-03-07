@@ -1,0 +1,18 @@
+{
+    "python.defaultInterpreterPath": "/home/juli/Software/python_apptainer.sh",
+
+    "python.languageServer": "Jedi",
+
+    "python.analysis.extraPaths": [
+        "./",
+        "/home/juli/Software"
+    ],
+
+    "python.autoComplete.extraPaths": [
+        "./",
+        "/home/juli/Software"
+    ],
+
+    "python.terminal.activateEnvInSelectedTerminal": true,
+    "python-envs.defaultEnvManager": "ms-python.python:system"
+}

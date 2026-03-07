@@ -1,114 +1,147 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import re
 import os
 import json
 
 def get_detailed_system_name(row):
-    """Identifica el sistema: Disco, Triangulo, Cuadrado, Pentagono, etc."""
     try:
         grains = json.loads(row['grain_json'])
-        grains_sorted = sorted(grains, key=lambda x: x['radius'], reverse=True)
-        big, small = grains_sorted[0], grains_sorted[1]
-        
-        nombres = {1: "Disco", 3: "Triangulo", 4: "Cuadrado", 5: "Pentagono"}
-        
-        n1 = nombres.get(big['sides'], f"Polig({big['sides']})")
-        n2 = nombres.get(small['sides'], f"Polig({small['sides']})")
-        
+        gs = sorted(grains, key=lambda x: x['radius'], reverse=True)
+        nombres = {1: "Disco", 3: "Tri", 4: "Cuad", 5: "Pent"}
+        n1 = nombres.get(gs[0]['sides'], "Pol")
+        n2 = nombres.get(gs[1]['sides'], "Pol") if len(gs)>1 else "Puro"
         return f"{n1}(G)-{n2}(C)"
-    except: 
-        return "Otros"
+    except: return "Otros"
 
-def main(av_path="../processed_data/1_avalanche_data/resultados_completos_esqueleto.csv", idx_path="../master_sim_index.csv"):
-    # Carga de datos
-    df_av = pd.read_csv(av_path)
+def main(mode='ratio_sweep', fixed_val=0.01, normalize=True, target_system=None,
+    idx_path = "../master_sim_index.csv",
+    av_path = "../processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"):
+    
+    if not os.path.exists(idx_path): return print("Ejecutá indexer.py primero.")
+    
     df_idx = pd.read_csv(idx_path)
+    df_av = pd.read_csv(av_path)
     
-    # Bautismo detallado
+    # Metadatos
     df_idx['sistema'] = df_idx.apply(get_detailed_system_name, axis=1)
+    df_idx['grano_base'] = df_idx['sistema'].apply(lambda x: x.split('-')[0])
     
-    def extract_chi(path):
-        match = re.search(r"Chi_(\d+p\d+)_", str(path))
-        return float(match.group(1).replace('p', '.')) if match else 0.0
-        
-    df_idx['chi'] = df_idx['path'].apply(extract_chi)
+    df = pd.merge(df_av, df_idx[['sim_hash', 'chi', 'r_ratio', 'area_ratio', 'sistema', 'grano_base']], on='sim_hash')
 
-    # Merge de datos
-    df = pd.merge(df_av, df_idx[['sim_hash', 'chi', 'sistema']], on='sim_hash')
+    df = df[df['chi'] <= 0.2]
 
-    # --- PROCESAMIENTO Y GUARDADO DE CSV ---
-    # Agrupamos por SISTEMA y por CHI, pidiendo media, SEM y conteo de avalanchas
-    stats = df.groupby(['sistema', 'chi']).agg(
-        tamano_big_mean=('tamano_big', 'mean'),
-        tamano_big_sem=('tamano_big', 'sem'),
-        n_avalanchas=('tamano_big', 'count')
+    # --- LÓGICA DE NORMALIZACIÓN ---
+    puros = df[df['chi'] == 0.0].groupby('grano_base').agg(
+        mean_0=('tamano_big', 'mean'),
+        sem_0=('tamano_big', 'sem')
     ).reset_index()
-    
-    # Manejo de NaNs en caso de que un grupo tenga una sola muestra (el SEM da NaN)
-    stats['tamano_big_sem'] = stats['tamano_big_sem'].fillna(0)
 
-    # Calculamos el logaritmo y propagamos su error: d(ln(x)) = dx / (x + 1)
-    stats['y_log'] = np.log(stats['tamano_big_mean'] + 1)
-    stats['y_log_err'] = stats['tamano_big_sem'] / (stats['tamano_big_mean'] + 1)
-    
-    # Aseguramos que la carpeta exista por las dudas
-    out_dir = "../processed_data/1_avalanche_data"
-    os.makedirs(out_dir, exist_ok=True)
-    
-    # Guardamos el archivo CSV con la información procesada (ESTO GUARDA TODO)
-    output_csv = os.path.join(out_dir, "datos_curvas_atascamiento.csv")
-    stats.to_csv(output_csv, index=False)
-    print(f"Datos exportados correctamente a: {output_csv}")
-    # ---------------------------------------
-
-    # --- NUEVO BLOQUE: FILTRO PARA EL GRÁFICO ---
-    # Identificamos las filas exactas que queremos excluir
-    # En este caso: Disco-Disco y Cuadrado-Disco con chi de 0.4 o mayor
-    # filas_a_excluir = (
-    #     ((stats['sistema'] == 'Disco(G)-Disco(C)') & (stats['chi'] >= 0.4)) |
-    #     ((stats['sistema'] == 'Cuadrado(G)-Disco(C)') & (stats['chi'] >= 0.4))
-    # )
-    
-    # Creamos un nuevo DataFrame para graficar, negando la condición con el símbolo '~'
-    # stats_grafico = stats[~filas_a_excluir]
-    stats_grafico = stats
-    # --------------------------------------------
-
-    # Graficamos curvas separadas
-    plt.figure(figsize=(10, 7))
-    
-    # IMPORTANTE: A partir de acá usamos stats_grafico en lugar de stats
-    for sis in stats_grafico['sistema'].unique():
-        data_sis = stats_grafico[stats_grafico['sistema'] == sis]
+    # --- CONFIGURACIÓN DE MODO ---
+    if mode == 'ratio_sweep':
+        # FILTRO CRÍTICO 1: Solo el chi que nos interesa
+        stats = df[df['chi'] == fixed_val].copy()
+        x_col, x_label = 'area_ratio', r"Ratio de Areas ($A_{S}/A_{L}$)"
+        suffix = f"ratio_sweep_chi{str(fixed_val).replace('.','p')}"
         
-        # Ordenamos por chi para que la línea no se cruce
-        data_sis = data_sis.sort_values('chi')
+        # FILTRO CRÍTICO 2: Solo el sistema que nos interesa (NUEVO)
+        if target_system is not None:
+            stats = stats[stats['sistema'] == target_system].copy()
+            # Limpiamos el nombre para que el archivo de salida no tenga caracteres raros
+            sys_safe = target_system.replace("(", "").replace(")", "").replace("-", "_")
+            suffix += f"_{sys_safe}"
+            
+    else:
+        stats = df.copy()
+        x_col, x_label = 'chi', r"Concentración $\chi$"
+        suffix = "chi_sweep"
         
-        # Usamos errorbar para graficar con el error calculado
-        plt.errorbar(
-            x=data_sis['chi'], 
-            y=data_sis['y_log'], 
-            yerr=data_sis['y_log_err'], 
-            fmt='o-',          
-            capsize=4,         
-            capthick=1.5,      
-            elinewidth=1.5,    
-            label=sis
-        )
+        # Si quisieras también filtrar por sistema en el barrido de chi
+        if target_system is not None:
+            stats = stats[stats['sistema'] == target_system].copy()
+            sys_safe = target_system.replace("(", "").replace(")", "").replace("-", "_")
+            suffix += f"_{sys_safe}"
 
-    plt.xlabel(r"Concentración de aditivo $\chi$", fontsize=12)
-    plt.ylabel(r"$\ln(\langle S_{big} \rangle + 1)$", fontsize=12)
-    plt.title("Análisis de Atascamiento y Tamaño de Avalancha", fontsize=14)
-    plt.legend(title="Sistemas")
-    plt.grid(True, linestyle='--', alpha=0.6)
+    # Verificación de seguridad por si el filtro dejó el dataset vacío
+    if stats.empty:
+        print(f"⚠️ No hay datos para procesar con chi={fixed_val} y sistema={target_system}. Saltando gráfico...")
+        return
+
+    # Agregación
+    res = stats.groupby(['sistema', 'chi', 'r_ratio', 'area_ratio', 'grano_base']).agg(
+        y_raw=('tamano_big', 'mean'),
+        y_err_raw=('tamano_big', 'sem')
+    ).reset_index()
+
+    # Unimos con los casos puros
+    res = pd.merge(res, puros, on='grano_base', how='left')
+
+    # Si no hay casos puros (chi=0), desactivamos normalización para evitar NaNs
+    if res['mean_0'].isnull().all():
+        print("⚠️ No se detectó Chi=0.0. Usando valores absolutos.")
+        normalize = False
+
+    if normalize:
+        res['mean_0'] = res['mean_0'].fillna(1.0) # Evitar div por cero
+        res['val'] = res['y_raw'] / res['mean_0']
+        res['err'] = res['val'] * np.sqrt((res['y_err_raw']/res['y_raw'])**2 + (res['sem_0'].fillna(0)/res['mean_0'])**2)
+        ylabel = r"$\ln(\langle S \rangle / \langle S \rangle_0 + 1)$"
+    else:
+        res['val'], res['err'] = res['y_raw'], res['y_err_raw']
+        ylabel = r"$\ln(\langle S \rangle + 1)$"
+
+    res['y_plot'] = np.log(res['val'] + 1)
+    res['y_err_plot'] = res['err'] / (res['val'] + 1)
+
+    # --- LIMPIEZA DE NaNs ANTES DE GRAFICAR ---
+    res = res.dropna(subset=['y_plot'])
+
+    # Graficación
+    plt.figure(figsize=(10, 6))
     
-    # Guardamos la imagen
-    out_img = os.path.join(out_dir, "analisis_atascamiento_comparativo.jpg")
-    plt.savefig(out_img, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"Gráfico exportado correctamente a: {out_img}")
+    if mode == 'chi_sweep':
+        for sis in res['sistema'].unique():
+            df_sis = res[res['sistema'] == sis]
+            
+            # Identificamos el radio "principal"
+            r_counts = df_sis['r_ratio'].value_counts()
+            main_r = r_counts.idxmax()
+            
+            # DESCARTAMOS el resto
+            grupo_principal = df_sis[df_sis['r_ratio'] == main_r].sort_values(x_col)
+            
+            # Trazamos la línea limpia
+            plt.errorbar(grupo_principal[x_col], grupo_principal['y_plot'], 
+                         yerr=grupo_principal['y_err_plot'], fmt='o-', 
+                         label=sis, capsize=3)
+    else:
+        # Comportamiento original para el barrido de áreas (ratio_sweep)
+        for sis, group in res.groupby('sistema'):
+            group = group.sort_values(x_col)
+            plt.errorbar(group[x_col], group['y_plot'], yerr=group['y_err_plot'], fmt='o-', label=sis, capsize=3)
+
+    plt.xlabel(x_label)
+    plt.ylabel(ylabel)
+    
+    titulo = f"Análisis de Atascamiento ({mode})"
+    if target_system: titulo += f" - {target_system}"
+    plt.title(titulo)
+    
+    # Ajustamos la leyenda para que no se superpongan demasiados elementos
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid(True, alpha=0.3)
+    
+    os.makedirs("../processed_data/1_avalanche_data", exist_ok=True)
+    
+    # Mantenemos el guardado en formato vectorial SVG
+    plt.savefig(f"../processed_data/1_avalanche_data/plot_{suffix}.svg", bbox_inches='tight', format='svg')
+    res.to_csv(f"../processed_data/1_avalanche_data/datos_{suffix}.csv", index=False)
+    
+    print(f"✅ Finalizado: plot_{suffix}.svg con {len(res)} puntos.")
 
 if __name__ == "__main__":
-    main()
+    # Ejemplo probando desde acá:
+    main(mode='ratio_sweep', fixed_val=0.01, normalize=True, target_system='Disco(G)-Disco(C)')
+    
+    # También podés correr el barrido clásico descomentando la línea de abajo:
+    #main(mode='chi_sweep', normalize=True)
