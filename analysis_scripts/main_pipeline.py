@@ -61,11 +61,15 @@ def main():
     print("\n[+] Ejecutando análisis estadístico global de flujo y avalanchas...")
     
     # Podés modificar fixed_val y target_system desde acá mismo
+    # flow_analysis.main(
+    #     mode='ratio_sweep',
+    #     fixed_val=0.01,
+    #     normalize=True,
+    #     target_system='Disco(G)-Disco(C)',  # <- Elegir el sistema (o poné None para ver todos)
+    #     av_path="../processed_data/1_avalanche_data/resultados_completos_esqueleto.csv",
+    #     idx_path=idx_path
+    # )
     flow_analysis.main(
-        mode='ratio_sweep',
-        fixed_val=0.01,
-        normalize=True,
-        target_system='Disco(G)-Disco(C)',  # <- Elegir el sistema (o poné None para ver todos)
         av_path="../processed_data/1_avalanche_data/resultados_completos_esqueleto.csv",
         idx_path=idx_path
     )
