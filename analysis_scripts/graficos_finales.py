@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
-import seaborn as sns # <-- NUEVA LIBRERÍA PARA EL GRÁFICO 5
+import seaborn as sns
 
 # =============================================================================
 # CONFIGURACIÓN DE RUTAS
@@ -23,6 +23,7 @@ def main():
 
     os.makedirs(OUT_DIR, exist_ok=True)
     df = pd.read_csv(DATA_PATH)
+    df = df[df['sistema'] != 'Cuad(G)-Cuad(C)']
 
     # =========================================================================
     # GRÁFICO 1: Discos Puros vs Orificio (D/d)^2
@@ -46,7 +47,7 @@ def main():
         plt.title("Efecto del Tamaño del Orificio de Descarga")
         plt.grid(True, alpha=0.3)
         plt.legend()
-        plt.savefig(f"{OUT_DIR}/plot1_Puros_vs_Orificio.png", bbox_inches='tight', format='png')
+        plt.savefig(f"{OUT_DIR}/plot1_puros_vs_orificio.png", bbox_inches='tight', format='png')
         plt.close()
 
     # =========================================================================
@@ -63,41 +64,137 @@ def main():
         df_base = df[(df['chi'] == 0.0) & (df['sistema'].str.startswith('Disco')) & (df['D_d_sq'] == main_D_d_sq)]
         df_export_g2 = pd.concat([df_base, df_dd]).sort_values(['chi', 'area_ratio'])
         cols_export = ['sistema', 'chi', 'area_ratio', 'D_d_sq', 'S_mean', 'S_sem', 'log_S', 'log_S_err']
-        df_export_g2[cols_export].to_csv(f"{OUT_DIR}/plot2_DiscoDisco_vs_AreaRatio_data.csv", index=False)
+        
+        # El CSV se exporta con TODOS los datos originales
+        df_export_g2[cols_export].to_csv(f"{OUT_DIR}/plot2_discodisco_vs_arearatio_data.csv", index=False)
+
+
+        chis_deseados = [0.2, 0.1, 0.01]
+        
+        # Filtramos df_dd creando un nuevo df_plot para no alterar los datos originales
+        df_plot = df_dd[df_dd['chi'].isin(chis_deseados)]
+        # ---------------------------------------------------------
 
         plt.figure(figsize=(9, 6))
         if not df_base.empty:
             base_val = df_base['log_S'].mean()
             base_err = df_base['log_S_err'].mean()
             plt.axhline(base_val, color='black', linestyle='--', linewidth=2, label=r'Puro ($\chi = 0$)')
-            x_min, x_max = df_dd['area_ratio'].min(), df_dd['area_ratio'].max()
+            x_min, x_max = df_plot['area_ratio'].min(), df_plot['area_ratio'].max() # Cambiado a df_plot
             plt.fill_between([x_min, x_max], base_val - base_err, base_val + base_err, color='black', alpha=0.1)
 
-        chis = np.sort(df_dd['chi'].unique())
+        # Cambiamos df_dd por df_plot aquí
+        chis = np.sort(df_plot['chi'].unique())
         cmap = cm.plasma 
         norm = mcolors.Normalize(vmin=chis.min(), vmax=chis.max())
 
         for chi_val in chis:
-            grp = df_dd[df_dd['chi'] == chi_val].sort_values('area_ratio')
+            # Cambiamos df_dd por df_plot aquí también
+            grp = df_plot[df_plot['chi'] == chi_val].sort_values('area_ratio')
             color_linea = cmap(norm(chi_val))
             plt.errorbar(grp['area_ratio'], grp['log_S'], yerr=grp['log_S_err'], 
-                         fmt='s-', color=color_linea, label=f"$\chi$ = {chi_val}", capsize=3, alpha=0.85, linewidth=1.5)
+                         fmt='s-', color=color_linea, label=rf"$\chi$ = {chi_val}", capsize=3, alpha=0.85, linewidth=1.5)
             
         plt.xlabel(r"Ratio de Áreas ($A_S/A_L$)")
         plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
         plt.title(f"Efecto del Tamaño del Aditivo (Orificio $(D/d)^2 = {main_D_d_sq:.2f}$)")
         plt.legend(title="Concentración", bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.grid(True, alpha=0.3)
-        plt.savefig(f"{OUT_DIR}/plot2_DiscoDisco_vs_AreaRatio.png", bbox_inches='tight', format='png')
+        plt.savefig(f"{OUT_DIR}/plot2_discodisco_vs_arearatio.png", bbox_inches='tight', format='png')
         plt.close()
 
+
+
     # =========================================================================
-    # GRÁFICO 3: Disco-Disco vs Chi (Barrido de Concentración por Tamaño)
+    # GRÁFICO 3: log_S vs Concentración (chi) para Ratios de Área Específicos
     # =========================================================================
-    print("  -> Generando Gráfico 3: Disco-Disco vs Chi (Superpuestos)...")
+    print("  -> Generando Gráfico 3: log_S vs Concentración (chi)...")
+    
+    ratios_deseados = [0.1, 0.4,0.8, 1.0] #np.round(np.linspace(0.1, 1.0, 10), 1).tolist()
+    
+    # Filtrar datos de la mezcla
+    df_mezcla = df[(df['sistema'] == 'Disco(G)-Disco(C)') & (df['chi'] > 0.0)].copy()
+    
+    if not df_mezcla.empty:
+        # Mantener el orificio principal como en el gráfico anterior
+        main_D_d_sq = df_mezcla['D_d_sq'].value_counts().idxmax()
+        df_mezcla = df_mezcla[df_mezcla['D_d_sq'] == main_D_d_sq]
+        
+        # SOLUCIÓN 1: Crear una columna temporal redondeada para comparaciones seguras
+        df_mezcla['area_ratio_round'] = df_mezcla['area_ratio'].round(3)
+        
+        # Filtrar el sistema puro (chi = 0) para el mismo orificio
+        df_puro = df[(df['chi'] == 0.0) & (df['sistema'].str.startswith('Disco')) & (df['D_d_sq'] == main_D_d_sq)]
+        
+        plt.figure(figsize=(9, 6))
+        
+        # SOLUCIÓN 2: Mapa de colores automático basado en tus ratios
+        cmap = cm.viridis # Cambia 'viridis' por 'plasma' o 'magma' si prefieres
+        norm = mcolors.Normalize(vmin=min(ratios_deseados), vmax=max(ratios_deseados))
+        
+        # Obtener el valor del sistema puro para añadirlo a x=0
+        puro_val, puro_err = None, None
+        if not df_puro.empty:
+            puro_val = df_puro['log_S'].mean()
+            puro_err = df_puro['log_S_err'].mean()
+            plt.errorbar([0], [puro_val], yerr=[puro_err], fmt='k*', markersize=10, 
+                         label=r'Puro ($\chi = 0$)', capsize=3, zorder=5)
+
+        # Iterar sobre los ratios de área y graficar
+        for ar in ratios_deseados:
+            # Usar la columna redondeada para filtrar
+            grp = df_mezcla[df_mezcla['area_ratio_round'] == round(ar, 3)].sort_values('chi')
+            
+            if not grp.empty:
+                x_data = grp['chi'].tolist()
+                y_data = grp['log_S'].tolist()
+                y_err = grp['log_S_err'].tolist()
+                
+                # Conectar la curva con el punto puro (chi=0) si existe
+                if puro_val is not None:
+                    x_data = [0.0] + x_data
+                    y_data = [puro_val] + y_data
+                    y_err = [puro_err] + y_err
+
+                color_linea = cmap(norm(ar))
+
+                plt.errorbar(x_data, y_data, yerr=y_err, 
+                             fmt="o-", # Marcador genérico 'o' para todas las curvas
+                             color=color_linea, 
+                             label=rf"Ratio de Área = {ar}", 
+                             capsize=3, alpha=0.85, linewidth=2)
+            else:
+                # Un aviso por consola por si pides un ratio que realmente no existe
+                print(f"    - Aviso: No se encontraron datos para area_ratio = {ar}")
+                
+        plt.xlabel(r"Concentración ($\chi$)")
+        plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
+        plt.title(f"Tamaño de Avalancha vs Concentración (Orificio $(D/d)^2 = {main_D_d_sq:.2f}$)")
+        
+        # Ajustar leyenda y grilla
+        plt.legend(title="Configuración", bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.grid(True, alpha=0.3)
+        
+        # Guardar gráfico
+        plt.savefig(f"{OUT_DIR}/plot3_logS_vs_chi.png", bbox_inches='tight', format='png')
+        plt.close()
+
+
+
+    # =========================================================================
+    # GRÁFICO 4: Disco-Disco vs Chi (Barrido de Concentración por Tamaño)
+    # =========================================================================
+    min_puntos = 3
+    
+    print("  -> Generando Gráfico 4: Disco-Disco vs Chi (Superpuestos)...")
     if not df_dd.empty:
         plt.figure(figsize=(8, 6))
         for area_ratio, grp in df_dd.groupby('area_ratio'):
+            # --- FILTRO AQUÍ ---
+            if len(grp) < min_puntos:
+                continue 
+            # -------------------
+            
             grp = grp.sort_values('chi')
             plt.errorbar(grp['chi'], grp['log_S'], yerr=grp['log_S_err'], 
                          fmt='^-', label=f"Ratio Área = {area_ratio:.2f}", capsize=4)
@@ -107,13 +204,13 @@ def main():
         plt.title(f"Curvas de Atascamiento por Tamaño (Orificio $(D/d)^2 = {main_D_d_sq:.2f}$)")
         plt.legend(title="Tamaño Aditivo", bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.grid(True, alpha=0.3)
-        plt.savefig(f"{OUT_DIR}/plot3_DiscoDisco_vs_Chi_Tamanos.png", bbox_inches='tight', format='png')
+        plt.savefig(f"{OUT_DIR}/plot4_discodisco_vs_chi_tamanos.png", bbox_inches='tight', format='png')
         plt.close()
 
     # =========================================================================
-    # GRÁFICO 4: Todas las Formas vs Chi (Normalizado)
+    # GRÁFICO 5: Todas las Formas vs Chi (Normalizado)
     # =========================================================================
-    print("  -> Generando Gráfico 4: Formas vs Chi (Normalizado)...")
+    print("  -> Generando Gráfico 5: Formas vs Chi (Normalizado)...")
     df_mezclas = df[~df['sistema'].str.contains('Puro')].copy()
     
     if 'main_D_d_sq' in locals():
@@ -165,16 +262,17 @@ def main():
         plt.title("Efecto Geométrico de la Forma (Normalizado)")
         plt.legend(title="Geometría del Sistema", bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.grid(True, alpha=0.3)
-        plt.savefig(f"{OUT_DIR}/plot4_Formas_vs_Chi_Norm.png", bbox_inches='tight', format='png')
+        plt.savefig(f"{OUT_DIR}/plot4_formas_vs_chi_norm.png", bbox_inches='tight', format='png')
         plt.close()
 
     # =========================================================================
-    # GRÁFICO 5: Composición del Arco vs. Composición Global (NUEVO)
+    # GRÁFICO 6: Composición del Arco vs. Composición Global
     # =========================================================================
-    print("  -> Generando Gráfico 5: Composición Local vs Global (Arcos)...")
+    print("  -> Generando Gráfico 6: Composición Local vs Global (Arcos)...")
     if os.path.exists(ARCOS_PATH):
         df_arcos = pd.read_csv(ARCOS_PATH)
-        
+        df_arcos = df_arcos[df_arcos['system_type'] != 'Cuad-Cuad']
+
         # Nos aseguramos de analizar solo los casos con mezcla
         df_arcos_mezclas = df_arcos[(df_arcos['chi'] > 0.0) & (df_arcos['chi'] <= 0.2)].copy()
         
@@ -219,7 +317,7 @@ def main():
             sns.despine() # Estilo limpio sin bordes superiores ni derechos
             plt.grid(True, alpha=0.3)
             
-            plt.savefig(f"{OUT_DIR}/plot5_Composicion_Arcos.png", bbox_inches='tight', format='png')
+            plt.savefig(f"{OUT_DIR}/plot6_composicion_arcos.png", bbox_inches='tight', format='png')
             plt.close()
             
             # Restauramos el estilo original de Matplotlib por si agregamos más gráficos luego
@@ -231,12 +329,164 @@ def main():
 
 
     # =========================================================================
-    # GRÁFICO 6: Morfología del Arco (Violin Plot de Tortuosidad)
+    # GRÁFICO 7: Composición del Arco vs. Composición Global por Tamaño
     # =========================================================================
-    print("  -> Generando Gráfico 6: Morfología del Arco (Tortuosidad)...")
+    print("  -> Generando Gráfico 7: Composición Local vs Global (Arcos) por Tamaño de Aditivo...")
     if os.path.exists(ARCOS_PATH):
         df_arcos = pd.read_csv(ARCOS_PATH)
         
+        # 1. Calculamos el area_ratio base (como antes)
+        if 'r_ratio' in df_arcos.columns:
+            df_arcos['area_ratio'] = df_arcos['r_ratio'] ** 2
+            if df_arcos['area_ratio'].max() > 1.1: 
+                df_arcos['area_ratio'] = 1.0 / df_arcos['area_ratio']
+
+        # Analizamos solo las mezclas de Disco-Disco
+        df_arcos_mezclas = df_arcos[(df_arcos['chi'] > 0.0) & (df_arcos['system_type'] == 'Disco-Disco')].copy()
+        
+        df_arcos_mezclas = df_arcos_mezclas[df_arcos_mezclas['Total_Particulas_Arco'] > 0]
+        
+        if not df_arcos_mezclas.empty and 'area_ratio' in df_arcos_mezclas.columns:
+            target_area_ratios = [0.4, 0.6, 0.8]
+            
+            # Para filtrar de forma segura, primero redondeamos el area_ratio calculado
+            df_arcos_mezclas['area_ratio_round'] = df_arcos_mezclas['area_ratio'].round(1)
+            
+            # Aplicamos el filtro: nos quedamos solo con los que están en la lista
+            df_plot = df_arcos_mezclas[df_arcos_mezclas['area_ratio_round'].isin(target_area_ratios)].copy()
+            # ---------------------------------------------------------
+            
+            if df_plot.empty:
+                print(f"     ⚠️ Advertencia: No se encontraron datos para los ratios {target_area_ratios}. Verificalos.")
+            else:
+                # Calculamos la fracción local solo para los datos filtrados
+                df_plot['Fraccion_Chicas_Arco'] = df_plot['Particulas_Tipo_1'] / df_plot['Total_Particulas_Arco']
+                
+                # Preparamos la variable categórica para Seaborn (0.1, 0.5, 0.9)
+                # Usamos los valores ya redondeados y los convertimos a string
+                col_agrupacion = 'area_ratio_round_str'
+                df_plot[col_agrupacion] = df_plot['area_ratio_round'].astype(str)
+                titulo_leyenda = 'Ratio de Área'
+                
+                # Ordenamos lógicamente para la leyenda
+                orden_leyenda = sorted(df_plot[col_agrupacion].unique(), key=float)
+
+                # Exportamos datos filtrados
+                cols_export_g5 = ['sim_hash', col_agrupacion, 'chi', 'Total_Particulas_Arco', 'Particulas_Tipo_1', 'Fraccion_Chicas_Arco']
+                cols_export_g5 = [c for c in cols_export_g5 if c in df_plot.columns]
+                df_plot[cols_export_g5].to_csv(f"{OUT_DIR}/plot7_composicion_arcos_tamanos_FILTRADO_data.csv", index=False)
+
+                sns.set_theme(style="ticks", context="notebook")
+                plt.figure(figsize=(9, 6))
+
+                ax = sns.lineplot(
+                    data=df_plot, 
+                    x='chi', 
+                    y='Fraccion_Chicas_Arco', 
+                    hue=col_agrupacion, 
+                    style=col_agrupacion,
+                    hue_order=orden_leyenda,
+                    style_order=orden_leyenda,
+                    palette='viridis', 
+                    markers=True,
+                    dashes=False,
+                    linewidth=2.5,
+                    err_style="bars", 
+                    errorbar=('ci', 95),
+                    err_kws={'capsize': 4}
+                )
+
+                max_chi = df_plot['chi'].max()
+                plt.plot([0, max_chi], [0, max_chi], 'k--', linewidth=2, alpha=0.7, label='Mezcla Homogénea (y=x)', zorder=0)
+
+                plt.title("Preferencialidad de Atascamiento:\nComposición del Arco vs. Global (Discos - Filtrado)")
+                plt.xlabel(r"Fracción Global de Partículas Chicas ($\chi$)")
+                plt.ylabel("Fracción de Chicas en el Arco")
+                
+                handles, labels = ax.get_legend_handles_labels()
+                plt.legend(handles=handles, labels=labels, title=titulo_leyenda, bbox_to_anchor=(1.05, 1), loc='upper left')
+                
+                sns.despine()
+                plt.grid(True, alpha=0.3)
+                
+                # Cambié el nombre para que sepas que es el filtrado
+                plt.savefig(f"{OUT_DIR}/plot7_composicion_arcos_tamanos_FILTRADO.png", bbox_inches='tight', format='png')
+                plt.close()
+                
+                plt.rcdefaults() 
+                sns.reset_defaults()
+        else:
+            print("     ⚠️ No se pudo calcular 'area_ratio' para Disco-Disco en arcos.")
+    else:
+        print(f"     ⚠️ No se encontró {ARCOS_PATH}. Ejecutá primero la consolidación de arcos.")
+
+
+
+    # =========================================================================
+    # GRÁFICO 8: Composición del Arco vs. Ratio de ÁREAS (chi=0.1 vs chi=0.01)
+    # =========================================================================
+    print("  -> Generando Gráfico 8: Composición de Arcos vs Ratio de ÁREAS...")
+    if os.path.exists(ARCOS_PATH):
+        df_arcos = pd.read_csv(ARCOS_PATH)
+        
+        # 1. Calculamos la fracción local en el arco
+        df_arcos['Fraccion_Chicas_Arco'] = df_arcos['Particulas_Tipo_1'] / df_arcos['Total_Particulas_Arco']
+        
+        # 2. Calculamos el RATIO DE ÁREAS (Radio^2)
+        # Asumiendo que r_ratio = R_grande / R_chico
+        df_arcos['area_ratio'] = df_arcos['r_ratio']**2
+        columna_x = 'area_ratio' 
+
+        # 3. Filtramos para chi=0.1 y chi=0.01
+        target_chis = [0.1, 0.01]
+        df_plot = df_arcos[df_arcos['chi'].isin(target_chis)].copy()
+        
+        if not df_plot.empty:
+            df_plot = df_plot.sort_values(by='chi', ascending=False)
+
+            sns.set_theme(style="ticks", context="notebook")
+            plt.figure(figsize=(9, 6))
+
+            # Graficamos
+            ax = sns.lineplot(
+                data=df_plot, 
+                x=columna_x, 
+                y='Fraccion_Chicas_Arco', 
+                hue='chi',
+                palette="viridis",
+                markers=True,
+                dashes=False,
+                linewidth=2.5,
+                err_style="bars", 
+                errorbar=('ci', 95),
+                err_kws={'capsize': 4}
+            )
+
+            # Líneas de referencia para mezcla homogénea
+            plt.axhline(y=0.1, color='green', linestyle='--', alpha=0.5, label=r'Referencia $\chi=0.1$')
+            plt.axhline(y=0.01, color='purple', linestyle='--', alpha=0.5, label=r'Referencia $\chi=0.01$')
+
+            plt.title(r"Preferencialidad en el Arco vs. Ratio de Áreas" + "\n" + r"Comparativa $\chi=0.1$ y $\chi=0.01$")
+            plt.xlabel(r"Ratio de Áreas ($A_{large}/A_{small}$)")
+            plt.ylabel("Fracción de Chicas en el Arco")
+            
+            plt.legend(title=r'Fracción Global ($\chi$)', bbox_to_anchor=(1.05, 1), loc='upper left')
+            sns.despine()
+            plt.grid(True, alpha=0.3)
+            
+            plt.savefig(f"{OUT_DIR}/plot8_composicion_vs_ratio_areas.png", bbox_inches='tight', format='png')
+            plt.close()
+            plt.rcdefaults() 
+ 
+
+    # =========================================================================
+    # GRÁFICO 9: Morfología del Arco (Violin Plot de Tortuosidad)
+    # =========================================================================
+    print("  -> Generando Gráfico 9: Morfología del Arco (Tortuosidad)...")
+    if os.path.exists(ARCOS_PATH):
+        df_arcos = pd.read_csv(ARCOS_PATH)
+        df_arcos = df_arcos[df_arcos['system_type'] != 'Cuad-Cuad']
+
         # Filtramos un rango de mezcla representativo (excluimos chi=0 para ver solo el efecto del aditivo)
         df_arcos_mezclas = df_arcos[(df_arcos['chi'] > 0.0) & (df_arcos['chi'] <= 0.2)].copy()
         
@@ -275,7 +525,7 @@ def main():
             if ax.legend_ is not None:
                 ax.legend_.remove()
             
-            plt.savefig(f"{OUT_DIR}/plot6_Tortuosidad_Arcos.png", bbox_inches='tight', format='png')
+            plt.savefig(f"{OUT_DIR}/plot9_tortuosidad_arcos.png", bbox_inches='tight', format='png')
             plt.close()
             
             # Restauramos el estilo base por si corremos más cosas
@@ -284,12 +534,13 @@ def main():
             print("     ⚠️ No se encontró la columna 'Tortuosidad' o no hay datos válidos.")
 
     # =========================================================================
-    # GRÁFICO 6-b: Morfología del Arco (Violin Plot de Tortuosidad) - SOLO DISCO BASE
+    # GRÁFICO 9-b: Morfología del Arco (Violin Plot de Tortuosidad) - SOLO DISCO BASE
     # =========================================================================
-    print("  -> Generando Gráfico 6: Morfología del Arco (Tortuosidad - Base Disco)...")
+    print("  -> Generando Gráfico 9-b: Morfología del Arco (Tortuosidad - Base Disco)...")
     if os.path.exists(ARCOS_PATH):
         df_arcos = pd.read_csv(ARCOS_PATH)
-        
+        df_arcos = df_arcos[df_arcos['system_type'] != 'Cuad-Cuad']
+
         # Filtramos un rango de mezcla representativo (excluimos chi=0 para ver solo el efecto del aditivo)
         df_arcos_mezclas = df_arcos[(df_arcos['chi'] > 0.0) & (df_arcos['chi'] <= 0.2)].copy()
         
@@ -336,7 +587,7 @@ def main():
             if ax.legend_ is not None:
                 ax.legend_.remove()
             
-            plt.savefig(f"{OUT_DIR}/plot6_Tortuosidad_Arcos_BaseDisco.png", bbox_inches='tight', format='png')
+            plt.savefig(f"{OUT_DIR}/plot9_tortuosidad_arcos_basedisco.png", bbox_inches='tight', format='png')
             plt.close()
             
             plt.rcdefaults()
@@ -344,102 +595,9 @@ def main():
             print("     ⚠️ No se encontró la columna 'Tortuosidad' o no hay datos válidos.")
 
 
-    # =========================================================================
-    # GRÁFICO 7: Efecto Estructural vs Efecto de Dilución
-    # =========================================================================
-    print("  -> Generando Gráfico 7: Corrección por Dilución (Efecto Estructural Puro)...")
-    if 'df_formas' in locals() and not df_formas.empty:
-        df_dilucion = df_formas.copy()
-        
-        # Aplicamos la corrección matemática: S_real = S_medido / (1 - chi)
-        # Esto estima cuántas partículas totales (grandes + chicas) cayeron en la avalancha
-        df_dilucion['val_norm_corregido'] = (df_dilucion['S_mean'] / (1 - df_dilucion['chi'])) / df_dilucion['S_mean_0']
-        df_dilucion['log_S_norm_corr'] = np.log(df_dilucion['val_norm_corregido'] + 1)
-        
-        # Asumimos un error similar propagado
-        df_dilucion['log_S_err_norm_corr'] = df_dilucion['log_S_err_norm'] # Simplificación visual
-        
-        plt.figure(figsize=(9, 6))
-        
-        # Vamos a graficar SOLO un par de sistemas contrastantes para que sea claro
-        sistemas_clave = ['Disco(G)-Disco(C)', 'Cuad(G)-Cuad(C)'] # Cambialos si querés ver otros
-        sistemas_presentes = [s for s in sistemas_clave if s in df_dilucion['sistema'].unique()]
-        
-        colores = {'Disco(G)-Disco(C)': 'tab:blue', 'Cuad(G)-Cuad(C)': 'tab:red'}
-        
-        for sis in sistemas_presentes:
-            df_sis = df_dilucion[df_dilucion['sistema'] == sis]
-            main_ar = df_sis['area_ratio'].value_counts().idxmax()
-            grp = df_sis[df_sis['area_ratio'] == main_ar].sort_values('chi')
-            
-            x_vals = grp['chi'].tolist()
-            # Datos crudos (con sesgo de dilución)
-            y_crudo = grp['log_S_norm'].tolist()
-            # Datos corregidos (física pura)
-            y_corr = grp['log_S_norm_corr'].tolist()
-            
-            if 0.0 not in x_vals:
-                x_vals.insert(0, 0.0)
-                y_crudo.insert(0, np.log(2.0))
-                y_corr.insert(0, np.log(2.0))
-            
-            color = colores.get(sis, 'black')
-            
-            # Línea punteada: Lo que mide el código (sesgado)
-            plt.plot(x_vals, y_crudo, f'o--', color=color, alpha=0.4, label=f"{sis} (Sin corregir)")
-            # Línea continua: La física real de la estructura
-            plt.plot(x_vals, y_corr, f's-', color=color, linewidth=2.5, label=f"{sis} (Corregido)")
-
-        plt.xlabel(r"Concentración $\chi$")
-        plt.ylabel(r"$\ln(\langle S \rangle / \langle S \rangle_0 + 1)$")
-        plt.title("Efecto de Dilución vs. Efecto Estructural Real")
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.grid(True, alpha=0.3)
-        plt.savefig(f"{OUT_DIR}/plot7_Correccion_Dilucion.png", bbox_inches='tight', format='png')
-        plt.close()
 
     # =========================================================================
-    # GRÁFICO 9: Robustez del Arco (Total Partículas)
-    # =========================================================================
-    print("  -> Generando Gráfico 9: Robustez del Arco...")
-    df_a9 = df_arcos[(df_arcos['chi'] > 0.0) & (df_arcos['system_type'].str.startswith('Disco'))].copy()
-    
-    if not df_a9.empty:
-        # GUARDAR CSV DEL GRÁFICO 9
-        df_a9[['system_type', 'chi', 'Total_Particulas_Arco']].to_csv(f"{OUT_DIR}/plot9_Robustez_Arcos_data.csv", index=False)
-
-        plt.figure(figsize=(9, 6))
-        sns.kdeplot(data=df_a9, x='Total_Particulas_Arco', hue='system_type', fill=True, alpha=0.3, linewidth=2)
-        plt.title("Robustez: ¿Cuántas partículas forman el arco?")
-        plt.xlim(0, df_a9['Total_Particulas_Arco'].quantile(0.98))
-        plt.savefig(f"{OUT_DIR}/plot9_Robustez_Arcos.png", bbox_inches='tight')
-        plt.close()
-
-    # =========================================================================
-    # GRÁFICO 10: Espacio de Fases (Span vs Altura)
-    # =========================================================================
-    print("  -> Generando Gráfico 10: Espacio de Fases (Span vs Altura)...")
-    df_a10 = df_arcos[(df_arcos['chi'] > 0.0) & (df_arcos['system_type'].isin(['Disco-Disco', 'Disco-Cuad']))].copy()
-    
-    if not df_a10.empty:
-        df_a10['Fraccion_Chicas'] = df_a10['Particulas_Tipo_1'] / df_a10['Total_Particulas_Arco']
-        
-        # GUARDAR CSV DEL GRÁFICO 10
-        df_a10[['system_type', 'Span', 'Altura', 'Fraccion_Chicas']].to_csv(f"{OUT_DIR}/plot10_EspacioFases_data.csv", index=False)
-
-        g = sns.FacetGrid(df_a10, col="system_type", height=6)
-        g.map_dataframe(sns.scatterplot, x="Span", y="Altura", hue="Fraccion_Chicas", palette="viridis", alpha=0.5)
-        
-        for ax in g.axes.flat:
-            x = np.linspace(df_a10['Span'].min(), df_a10['Span'].max(), 10)
-            ax.plot(x, x/2, 'r--', label='Semicírculo') # Referencia geométrica
-            
-        plt.savefig(f"{OUT_DIR}/plot10_EspacioFases_Arcos.png", bbox_inches='tight', dpi=300)
-        plt.close()
-    
-
-    # =========================================================================
-    # ESTADÍSTICA DE DISPERSIÓN (Graficos 11, 12 y 13)
+    # ESTADÍSTICA DE DISPERSIÓN (Grafico 10)
     # =========================================================================
     RAW_FLOW_PATH = "../processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"
 
@@ -448,52 +606,13 @@ def main():
         df_esqueleto_raw = pd.read_csv(RAW_FLOW_PATH)
         df_arcos_meta = pd.read_csv(ARCOS_PATH)
         
+        df_arcos_meta = df_arcos_meta[df_arcos_meta['system_type'] != 'Cuad-Cuad']
+
         # Mapeo: sim_hash -> system_type, chi
         meta = df_arcos_meta[['sim_hash', 'system_type', 'chi']].drop_duplicates()
         
         # Merge de datos crudos con metadatos del sistema
         df_raw = pd.merge(df_esqueleto_raw, meta, on='sim_hash', how='inner')
-
-        # Estadísticas agrupadas para CV y Fluctuaciones
-        stats_disp = df_raw.groupby(['system_type', 'chi'])['tamano_big'].agg(['mean', 'std']).reset_index()
-        stats_disp['cv'] = stats_disp['std'] / stats_disp['mean']
-
-        # --- GRÁFICO 11: Coeficiente de Variación (CV) ---
-        print("  -> Generando Gráfico 11: CV...")
-        stats_disp.to_csv(f"{OUT_DIR}/plot11_CV_data.csv", index=False)
-        
-        plt.figure(figsize=(9, 6))
-        sns.lineplot(data=stats_disp, x='chi', y='cv', hue='system_type', marker='o', linewidth=2)
-        plt.axhline(1.0, color='black', linestyle='--', alpha=0.5, label='Límite Poisson (CV=1)')
-        
-        plt.title("Estabilidad del Flujo: Coeficiente de Variación")
-        plt.ylabel(r"CV ($\sigma / \mu$)")
-        plt.xlabel(r"Concentración $\chi$")
-        plt.grid(True, alpha=0.3)
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.savefig(f"{OUT_DIR}/plot11_CV_vs_Chi.png", dpi=300, bbox_inches='tight')
-        plt.close()
-
-        # --- GRÁFICO 12: Scaling de Fluctuaciones (Sigma vs Mu) ---
-        print("  -> Generando Gráfico 12: Fluctuaciones...")
-        stats_disp.to_csv(f"{OUT_DIR}/plot12_Fluctuaciones_data.csv", index=False)
-        
-        plt.figure(figsize=(8, 8))
-        sns.scatterplot(data=stats_disp, x='mean', y='std', hue='system_type', s=100, alpha=0.8)
-        
-        # Referencia Poissoniana (sigma = sqrt(mu))
-        x_ref = np.logspace(np.log10(stats_disp['mean'].min()), np.log10(stats_disp['mean'].max()), 100)
-        plt.plot(x_ref, np.sqrt(x_ref), 'k--', alpha=0.5, label=r'Poisson ($\sigma = \sqrt{\mu}$)')
-        
-        plt.xscale('log')
-        plt.yscale('log')
-        plt.title(r"Scaling de Fluctuaciones: $\sigma$ vs $\mu$")
-        plt.xlabel(r"Promedio de Avalancha ($\mu$)")
-        plt.ylabel(r"Desviación Estándar ($\sigma$)")
-        plt.grid(True, which="both", alpha=0.2)
-        plt.legend()
-        plt.savefig(f"{OUT_DIR}/plot12_Fluctuaciones_Scaling.png", dpi=300, bbox_inches='tight')
-        plt.close()
 
         # --- GRÁFICO 13: Boxplot (Distribución de Avalanchas) ---
         print("  -> Generando Gráfico 13: Boxplot...")
@@ -510,7 +629,7 @@ def main():
         plt.ylabel("Tamaño de Avalancha (S) [Escala Log]")
         plt.xlabel("Sistema")
         plt.grid(True, axis='y', alpha=0.3)
-        plt.savefig(f"{OUT_DIR}/plot13_Boxplot_Avalanchas.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{OUT_DIR}/plot10_boxplot_avalanchas.png", dpi=300, bbox_inches='tight')
         plt.close()
     else:
         print(f"     ⚠️ No se encontró el archivo de esqueleto crudo para los gráficos de dispersión.")
