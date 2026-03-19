@@ -69,7 +69,7 @@ def main():
         df_export_g2[cols_export].to_csv(f"{OUT_DIR}/plot2_discodisco_vs_arearatio_data.csv", index=False)
 
 
-        chis_deseados = [0.2, 0.1, 0.01]
+        chis_deseados = [0.2, 0.1, 0.14, 0.01]
         
         # Filtramos df_dd creando un nuevo df_plot para no alterar los datos originales
         df_plot = df_dd[df_dd['chi'].isin(chis_deseados)]
@@ -110,7 +110,7 @@ def main():
     # =========================================================================
     print("  -> Generando Gráfico 3: log_S vs Concentración (chi)...")
     
-    ratios_deseados = [0.1, 0.4,0.8, 1.0] #np.round(np.linspace(0.1, 1.0, 10), 1).tolist()
+    ratios_deseados = [0.1, 0.3, 0.4, 0.8, 1.0] #np.round(np.linspace(0.1, 1.0, 10), 1).tolist()
     
     # Filtrar datos de la mezcla
     df_mezcla = df[(df['sistema'] == 'Disco(G)-Disco(C)') & (df['chi'] > 0.0)].copy()
