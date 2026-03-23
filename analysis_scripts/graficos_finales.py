@@ -36,7 +36,7 @@ def main():
     if not df_puros.empty:
         df_puros = df_puros.sort_values('D_d_sq')
         cols_export = ['sistema', 'D_d_sq', 'S_mean', 'S_sem', 'log_S', 'log_S_err']
-        df_puros[cols_export].to_csv(f"{OUT_DIR}/plot1_Puros_vs_Orificio_data.csv", index=False)
+        df_puros[cols_export].to_csv(f"{OUT_DIR}/1_puros_vs_orificio.csv", index=False)
 
         plt.figure(figsize=(8, 6))
         plt.errorbar(df_puros['D_d_sq'], df_puros['log_S'], yerr=df_puros['log_S_err'], 
@@ -47,7 +47,7 @@ def main():
         plt.title("Efecto del Tamaño del Orificio de Descarga")
         plt.grid(True, alpha=0.3)
         plt.legend()
-        plt.savefig(f"{OUT_DIR}/plot1_puros_vs_orificio.png", bbox_inches='tight', format='png')
+        plt.savefig(f"{OUT_DIR}/1_puros_vs_orificio.png", bbox_inches='tight', format='png')
         plt.close()
 
     # =========================================================================
@@ -66,7 +66,7 @@ def main():
         cols_export = ['sistema', 'chi', 'area_ratio', 'D_d_sq', 'S_mean', 'S_sem', 'log_S', 'log_S_err']
         
         # El CSV se exporta con TODOS los datos originales
-        df_export_g2[cols_export].to_csv(f"{OUT_DIR}/plot2_discodisco_vs_arearatio_data.csv", index=False)
+        df_export_g2[cols_export].to_csv(f"{OUT_DIR}/2_disco_disco_vs_area_ratio.csv", index=False)
 
 
         chis_deseados = [0.2, 0.1, 0.14, 0.01]
@@ -100,7 +100,7 @@ def main():
         plt.title(f"Efecto del Tamaño del Aditivo (Orificio $(D/d)^2 = {main_D_d_sq:.2f}$)")
         plt.legend(title="Concentración", bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.grid(True, alpha=0.3)
-        plt.savefig(f"{OUT_DIR}/plot2_discodisco_vs_arearatio.png", bbox_inches='tight', format='png')
+        plt.savefig(f"{OUT_DIR}/2_disco_disco_vs_area_ratio.png", bbox_inches='tight', format='png')
         plt.close()
 
 
@@ -176,7 +176,7 @@ def main():
         plt.grid(True, alpha=0.3)
         
         # Guardar gráfico
-        plt.savefig(f"{OUT_DIR}/plot3_logS_vs_chi.png", bbox_inches='tight', format='png')
+        plt.savefig(f"{OUT_DIR}/3_logs_vs_chi.png", bbox_inches='tight', format='png')
         plt.close()
 
 
@@ -204,7 +204,7 @@ def main():
         plt.title(f"Curvas de Atascamiento por Tamaño (Orificio $(D/d)^2 = {main_D_d_sq:.2f}$)")
         plt.legend(title="Tamaño Aditivo", bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.grid(True, alpha=0.3)
-        plt.savefig(f"{OUT_DIR}/plot4_discodisco_vs_chi_tamanos.png", bbox_inches='tight', format='png')
+        plt.savefig(f"{OUT_DIR}/4_disco_disco_vs_chi_tamanos.png", bbox_inches='tight', format='png')
         plt.close()
 
     # =========================================================================
@@ -221,6 +221,9 @@ def main():
     df_formas = pd.merge(df_mezclas, df_puros_ref, on=['grano_base', 'D_d_sq'], how='inner')
     
     if not df_formas.empty:
+        sistemas_interes = ['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)']
+        df_formas = df_formas[df_formas['sistema'].isin(sistemas_interes)]
+
         df_formas['val_norm'] = df_formas['S_mean'] / df_formas['S_mean_0']
         df_formas['err_norm'] = df_formas['val_norm'] * np.sqrt(
             (df_formas['S_sem'] / df_formas['S_mean'])**2 + 
@@ -262,7 +265,7 @@ def main():
         plt.title("Efecto Geométrico de la Forma (Normalizado)")
         plt.legend(title="Geometría del Sistema", bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.grid(True, alpha=0.3)
-        plt.savefig(f"{OUT_DIR}/plot4_formas_vs_chi_norm.png", bbox_inches='tight', format='png')
+        plt.savefig(f"{OUT_DIR}/5_formas_vs_chi_norm.png", bbox_inches='tight', format='png')
         plt.close()
 
     # =========================================================================
@@ -282,7 +285,7 @@ def main():
             
             # Exportamos la tabla filtrada para reproducibilidad
             cols_export_g5 = ['sim_hash', 'system_type', 'chi', 'Total_Particulas_Arco', 'Particulas_Tipo_1', 'Fraccion_Chicas_Arco']
-            df_arcos_mezclas[cols_export_g5].to_csv(f"{OUT_DIR}/plot5_Composicion_Arcos_data.csv", index=False)
+            df_arcos_mezclas[cols_export_g5].to_csv(f"{OUT_DIR}/6_composicion_arcos.csv", index=False)
 
             # Configuramos Seaborn para un look limpio y profesional
             sns.set_theme(style="ticks", context="notebook")
@@ -317,10 +320,9 @@ def main():
             sns.despine() # Estilo limpio sin bordes superiores ni derechos
             plt.grid(True, alpha=0.3)
             
-            plt.savefig(f"{OUT_DIR}/plot6_composicion_arcos.png", bbox_inches='tight', format='png')
+            plt.savefig(f"{OUT_DIR}/6_composicion_arcos.png", bbox_inches='tight', format='png')
             plt.close()
             
-            # Restauramos el estilo original de Matplotlib por si agregamos más gráficos luego
             plt.rcdefaults() 
         else:
             print("     ⚠️ No se detectaron casos de mezclas en el dataset de arcos.")
@@ -374,7 +376,7 @@ def main():
                 # Exportamos datos filtrados
                 cols_export_g5 = ['sim_hash', col_agrupacion, 'chi', 'Total_Particulas_Arco', 'Particulas_Tipo_1', 'Fraccion_Chicas_Arco']
                 cols_export_g5 = [c for c in cols_export_g5 if c in df_plot.columns]
-                df_plot[cols_export_g5].to_csv(f"{OUT_DIR}/plot7_composicion_arcos_tamanos_FILTRADO_data.csv", index=False)
+                df_plot[cols_export_g5].to_csv(f"{OUT_DIR}/7_composicion_arcos_tamanos.csv", index=False)
 
                 sns.set_theme(style="ticks", context="notebook")
                 plt.figure(figsize=(9, 6))
@@ -410,7 +412,7 @@ def main():
                 plt.grid(True, alpha=0.3)
                 
                 # Cambié el nombre para que sepas que es el filtrado
-                plt.savefig(f"{OUT_DIR}/plot7_composicion_arcos_tamanos_FILTRADO.png", bbox_inches='tight', format='png')
+                plt.savefig(f"{OUT_DIR}/7_composicion_arcos_tamanos.png", bbox_inches='tight', format='png')
                 plt.close()
                 
                 plt.rcdefaults() 
@@ -474,7 +476,7 @@ def main():
             sns.despine()
             plt.grid(True, alpha=0.3)
             
-            plt.savefig(f"{OUT_DIR}/plot8_composicion_vs_ratio_areas.png", bbox_inches='tight', format='png')
+            plt.savefig(f"{OUT_DIR}/8_composicion_vs_ratio_areas.png", bbox_inches='tight', format='png')
             plt.close()
             plt.rcdefaults() 
  
@@ -525,10 +527,9 @@ def main():
             if ax.legend_ is not None:
                 ax.legend_.remove()
             
-            plt.savefig(f"{OUT_DIR}/plot9_tortuosidad_arcos.png", bbox_inches='tight', format='png')
+            plt.savefig(f"{OUT_DIR}/9_tortuosidad_arcos.png", bbox_inches='tight', format='png')
             plt.close()
             
-            # Restauramos el estilo base por si corremos más cosas
             plt.rcdefaults()
         else:
             print("     ⚠️ No se encontró la columna 'Tortuosidad' o no hay datos válidos.")
@@ -553,7 +554,7 @@ def main():
             
             # Exportamos los datos clave de este gráfico para reproducibilidad
             cols_export_g6 = ['sim_hash', 'system_type', 'chi', 'Total_Particulas_Arco', 'Tortuosidad']
-            df_arcos_mezclas[cols_export_g6].to_csv(f"{OUT_DIR}/plot6_Tortuosidad_Arcos_BaseDisco_data.csv", index=False)
+            df_arcos_mezclas[cols_export_g6].to_csv(f"{OUT_DIR}/9b_tortuosidad_arcos_base_disco.csv", index=False)
 
             # Configuramos Seaborn
             sns.set_theme(style="ticks", context="notebook")
@@ -587,7 +588,7 @@ def main():
             if ax.legend_ is not None:
                 ax.legend_.remove()
             
-            plt.savefig(f"{OUT_DIR}/plot9_tortuosidad_arcos_basedisco.png", bbox_inches='tight', format='png')
+            plt.savefig(f"{OUT_DIR}/9b_tortuosidad_arcos_base_disco.png", bbox_inches='tight', format='png')
             plt.close()
             
             plt.rcdefaults()
@@ -615,10 +616,10 @@ def main():
         df_raw = pd.merge(df_esqueleto_raw, meta, on='sim_hash', how='inner')
 
         # --- GRÁFICO 13: Boxplot (Distribución de Avalanchas) ---
-        print("  -> Generando Gráfico 13: Boxplot...")
+        print("  -> Generando Gráfico 10: Boxplot...")
         chi_max = df_raw['chi'].max()
         df_box = df_raw[np.isclose(df_raw['chi'], chi_max)].copy()
-        df_box.to_csv(f"{OUT_DIR}/plot13_Boxplot_data.csv", index=False)
+        df_box.to_csv(f"{OUT_DIR}/10_boxplot.csv", index=False)
 
         plt.figure(figsize=(10, 6))
         sns.boxplot(data=df_box, x='system_type', y='tamano_big', hue='system_type', palette='Set3', legend=False)
@@ -629,7 +630,7 @@ def main():
         plt.ylabel("Tamaño de Avalancha (S) [Escala Log]")
         plt.xlabel("Sistema")
         plt.grid(True, axis='y', alpha=0.3)
-        plt.savefig(f"{OUT_DIR}/plot10_boxplot_avalanchas.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{OUT_DIR}/10_boxplot_avalanchas.png", dpi=300, bbox_inches='tight')
         plt.close()
     else:
         print(f"     ⚠️ No se encontró el archivo de esqueleto crudo para los gráficos de dispersión.")
