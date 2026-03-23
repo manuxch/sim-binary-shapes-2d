@@ -6,8 +6,9 @@ import re
 import numpy as np
 
 # --- CONFIGURACIÓN ---
-ROOT_DIR = "../datos_simulaciones/simulation_data/R_2.0"
-OUTPUT_CSV = "../master_sim_index.csv"
+
+ROOT_DIR = "/work/lab/project/sim-binary-shapes-2d/datos_simulaciones/simulation_data/R_2.0"
+OUTPUT_CSV = "/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
 
 def path_val_to_float(val_str):
     if not val_str: return None

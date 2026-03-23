@@ -9,9 +9,9 @@ import seaborn as sns
 # =============================================================================
 # CONFIGURACIÓN DE RUTAS
 # =============================================================================
-DATA_PATH = "../processed_data/1_avalanche_data/estadisticas_flujo_agregadas.csv"
-ARCOS_PATH = "../processed_data/1_avalanche_data/resultados_completos_arcos.csv"
-OUT_DIR = "../processed_data/5_graficos_finales"
+DATA_PATH = "/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/estadisticas_flujo_agregadas.csv"
+ARCOS_PATH = "/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_arcos.csv"
+OUT_DIR = "/work/lab/project/sim-binary-shapes-2d/processed_data/5_graficos_finales"
 
 def main():
     print("[+] Generando gráficos finales de alta calidad (SVG y CSV)...")
@@ -599,7 +599,7 @@ def main():
     # =========================================================================
     # ESTADÍSTICA DE DISPERSIÓN (Grafico 10)
     # =========================================================================
-    RAW_FLOW_PATH = "../processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"
+    RAW_FLOW_PATH = "/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"
 
     if os.path.exists(RAW_FLOW_PATH) and os.path.exists(ARCOS_PATH):
         # Leemos los datos crudos de avalanchas (esqueleto) para tener el 'sim_hash'

@@ -10,8 +10,8 @@ matplotlib.use('Agg') # Para ejecución en servidor/headless
 # =============================================================================
 # CONFIGURACIÓN DE RUTAS
 # =============================================================================
-MEGA_DATASET_PATH = "../processed_data/1_avalanche_data/resultados_completos_arcos.csv"
-OUTPUT_DIR = "../processed_data/4_arch_histograms"
+MEGA_DATASET_PATH = "/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_arcos.csv"
+OUTPUT_DIR = "/work/lab/project/sim-binary-shapes-2d/processed_data/4_arch_histograms"
 
 def plot_arch_histograms(dataset_path=MEGA_DATASET_PATH, output_dir=OUTPUT_DIR):
     print(f"\n[+] Generando análisis avanzado de composición de arcos (Multivariable)...")
@@ -56,7 +56,7 @@ def plot_arch_histograms(dataset_path=MEGA_DATASET_PATH, output_dir=OUTPUT_DIR):
         plt.hist(df_plot['Particulas_Tipo_0'], bins=bins, alpha=0.5, label='Grandes (Matriz)', color='#1f77b4')
         plt.hist(df_plot['Particulas_Tipo_1'], bins=bins, alpha=0.7, label='Chicas (Aditivo)', color='#ff7f0e')
         
-        plt.title(f"Composición de Arcos: {sistema}\n$\chi$={chi} | Ratio={ratio}", fontsize=13)
+        plt.title(f"Composición de Arcos: {sistema}\n$\\chi$={chi} | Ratio={ratio}", fontsize=13)
         plt.xlabel("Cantidad de partículas en el arco")
         plt.ylabel("Frecuencia")
         plt.xticks(np.arange(0, df_plot['Total_Particulas_Arco'].max() + 1))
@@ -71,7 +71,7 @@ def plot_arch_histograms(dataset_path=MEGA_DATASET_PATH, output_dir=OUTPUT_DIR):
         sns.boxplot(data=df_plot, x='Total_Particulas_Arco', y='Fraccion_Tipo_1', color='lightgrey', showfliers=False)
         sns.stripplot(data=df_plot, x='Total_Particulas_Arco', y='Fraccion_Tipo_1', alpha=0.3, jitter=True)
         
-        plt.axhline(chi, color='red', linestyle='--', label=f'Nominal $\chi$={chi}')
+        plt.axhline(chi, color='red', linestyle='--', label=fr'Nominal $\chi$={chi}')
         plt.title(f"Fracción de Aditivos por Tamaño de Arco\n{sistema} | Ratio={ratio}")
         plt.ylim(-0.05, 1.05)
         plt.legend()
@@ -91,9 +91,9 @@ def plot_arch_histograms(dataset_path=MEGA_DATASET_PATH, output_dir=OUTPUT_DIR):
         stats = df_trend.groupby('r_ratio')['Fraccion_Tipo_1'].agg(['mean', 'std']).reset_index()
         
         plt.errorbar(stats['r_ratio'], stats['mean'], yerr=stats['std'], fmt='o-', capsize=5, label='Composición Media')
-        plt.axhline(chi, color='red', linestyle=':', label=f'Mezcla Nominal ($\chi$={chi})')
+        plt.axhline(chi, color='red', linestyle=':', label=fr'Mezcla Nominal ($\chi$={chi})')
         
-        plt.title(f"Composición de Arcos vs Tamaño de Aditivo\n{sistema} | $\chi$ fijo = {chi}")
+        plt.title(f"Composición de Arcos vs Tamaño de Aditivo\n{sistema} | $\\chi$ fijo = {chi}")
         plt.xlabel("Ratio de Radios ($R_{large}/R_{small}$)")
         plt.ylabel("Fracción de Aditivos en Arcos")
         plt.grid(True, alpha=0.3)

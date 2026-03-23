@@ -5,7 +5,7 @@ import os
 # =============================================================================
 # CONSOLIDADOR PRINCIPAL (Enfoque: Source of Truth)
 # =============================================================================
-def consolidate_arcs(idx_path="../master_sim_index.csv", output_dir="../processed_data/1_avalanche_data"):
+def consolidate_arcs(idx_path="/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv", output_dir="/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data"):
     """
     Consolida todos los archivos de arcos y los enriquece mediante un merge 
     con el índice maestro, asegurando precisión en radios y concentraciones.

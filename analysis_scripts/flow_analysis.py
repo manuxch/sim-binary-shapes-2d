@@ -30,8 +30,8 @@ def get_physics_extras(row):
     except:
         return pd.Series({'r_large': np.nan, 'D_d_sq': np.nan})
 
-def main(idx_path="../master_sim_index.csv", 
-         av_path="../processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"):
+def main(idx_path="/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv", 
+         av_path="/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"):
     
     print("[+] Ejecutando análisis estadístico global de flujo y avalanchas...")
     if not os.path.exists(idx_path): 
@@ -77,7 +77,7 @@ def main(idx_path="../master_sim_index.csv",
     res = res.dropna(subset=['log_S'])
 
     # 5. Guardado del Dataset Agregado
-    out_dir = "../processed_data/1_avalanche_data"
+    out_dir = "/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data"
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "estadisticas_flujo_agregadas.csv")
     

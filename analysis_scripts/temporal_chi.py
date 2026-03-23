@@ -6,7 +6,7 @@ import json
 from multiprocessing import Pool, cpu_count
 
 # --- CONFIGURACIÓN ---
-INDEX_FILE = "../master_sim_index.csv"
+INDEX_FILE = "/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
 WINDOW_SIZE = 10.0  # Tamaño del batch en segundos
 CPU_CORES = cpu_count()
 

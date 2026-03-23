@@ -5,9 +5,9 @@ import seaborn as sns
 import os
 
 # --- CONFIGURACIÓN ---
-AV_PATH = "../processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"
-IDX_PATH = "../master_sim_index.csv"
-OUTPUT_DIR = "../processed_data/3_tail_distributions"
+AV_PATH = "/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"
+IDX_PATH = "/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
+OUTPUT_DIR = "/work/lab/project/sim-binary-shapes-2d/processed_data/3_tail_distributions"
 
 def main(av_path=AV_PATH, idx_path=IDX_PATH, output_dir=OUTPUT_DIR, fixed_chi=None):
     """
@@ -41,7 +41,7 @@ def main(av_path=AV_PATH, idx_path=IDX_PATH, output_dir=OUTPUT_DIR, fixed_chi=No
             # --- MEJORA SENIOR: Etiqueta Combinada ---
             # Si el chi es el mismo, la leyenda mostrará el Ratio. Si no, mostrará ambos.
             df_sis['label'] = df_sis.apply(
-                lambda r: f"$\chi$={r['chi']} | R={r['r_ratio']}", axis=1
+                lambda r: fr"$\chi$={r['chi']} | R={r['r_ratio']}", axis=1
             )
             
             # Ordenamos para que la escala de colores (palette) sea lógica
@@ -60,7 +60,7 @@ def main(av_path=AV_PATH, idx_path=IDX_PATH, output_dir=OUTPUT_DIR, fixed_chi=No
                         alpha=0.8)
 
             titulo = f'Distribución de Avalanchas: {sistema}'
-            if fixed_chi: titulo += f' ($\chi$={fixed_chi})'
+            if fixed_chi: titulo += fr' ($\chi$={fixed_chi})'
             
             plt.title(titulo, fontsize=14, pad=15)
             plt.xlabel('Tamaño de Avalancha ($S_{big}$)', fontsize=12)
