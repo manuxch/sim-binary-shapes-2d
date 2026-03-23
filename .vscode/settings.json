@@ -15,4 +15,11 @@
 
     "python.terminal.activateEnvInSelectedTerminal": true,
     "python-envs.defaultEnvManager": "ms-python.python:system"
+    "files.exclude": {
+        "**/.git": true,
+        "**/.DS_Store": true,
+        "**/__pycache__": true,
+        "**/containers": true,
+        "processed_data/temp_*": true
+    }
 }
