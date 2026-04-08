@@ -1,1 +1,0 @@
-apptainer run --bind .:/mnt ../../containers/workstation_full.sif
