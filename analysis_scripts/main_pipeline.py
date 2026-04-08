@@ -4,13 +4,10 @@ import shutil
 # --- Módulos  ---
 import indexer
 import processor
-# import plot_profiles
 import flow_analysis
 import tail_distribution_chi
 import density_map
 import temporal_chi
-# import wall_chi_variation
-# import plot_wall_chi
 import generar_csv_arcos
 import arch_consolidator
 import histogram_arch
