@@ -10,8 +10,8 @@ matplotlib.use('Agg') # Para ejecución en servidor/headless
 # =============================================================================
 # CONFIGURACIÓN DE RUTAS
 # =============================================================================
-MEGA_DATASET_PATH = "/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_arcos.csv"
-OUTPUT_DIR = "/work/lab/project/sim-binary-shapes-2d/processed_data/4_arch_histograms"
+MEGA_DATASET_PATH = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_arcos.csv"
+OUTPUT_DIR = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/4_arch_histograms"
 
 def plot_arch_histograms(dataset_path=MEGA_DATASET_PATH, output_dir=OUTPUT_DIR):
     print(f"\n[+] Generando análisis avanzado de composición de arcos (Multivariable)...")

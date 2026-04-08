@@ -6,19 +6,17 @@ import json
 from multiprocessing import Pool, cpu_count
 
 # --- CONFIGURACIÓN ---
-INDEX_FILE = "/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
+INDEX_FILE = "/home/juli/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
 WINDOW_SIZE = 10.0  # Tamaño del batch en segundos
 CPU_CORES = cpu_count()
 
-def calcular_area_unitaria(radio, lados):
-    """Calcula el área exacta según la geometría"""
-    if lados == 1:   # DISCO
-        return np.pi * (radio ** 2)
-    elif lados == 4: # CUADRADO (asumiendo que R es la mitad del lado o el radio circunscrito, ajusta si es necesario)
-        return 4.0 * (radio ** 2) 
-    else:            # POLÍGONOS REGULARES (3, 5, 6, etc.)
-        # Fórmula del área usando el radio de la circunferencia circunscrita
-        return (lados * (radio ** 2) * np.sin(2 * np.pi / lados)) / 2
+def calcular_area_unitaria(radio, lados=1):
+    """
+    Calcula el área física real que ocupa la partícula en el silo.
+    Se usa la fórmula del círculo porque el área de los polígonos 
+    está normalizada en el simulador.
+    """
+    return np.pi * (radio ** 2)
 
 def analizar_flujo_temporal(row):
     path = row['path']

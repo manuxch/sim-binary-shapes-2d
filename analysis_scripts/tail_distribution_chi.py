@@ -5,9 +5,9 @@ import seaborn as sns
 import os
 
 # --- CONFIGURACIÓN ---
-AV_PATH = "/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"
-IDX_PATH = "/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
-OUTPUT_DIR = "/work/lab/project/sim-binary-shapes-2d/processed_data/3_tail_distributions"
+AV_PATH = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"
+IDX_PATH = "/home/juli/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
+OUTPUT_DIR = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/3_tail_distributions"
 
 def main(av_path=AV_PATH, idx_path=IDX_PATH, output_dir=OUTPUT_DIR, fixed_chi=None):
     """

@@ -7,17 +7,19 @@ import numpy as np
 
 # --- CONFIGURACIÓN ---
 
-ROOT_DIR = "/work/lab/project/sim-binary-shapes-2d/datos_simulaciones/simulation_data/R_2.0"
-OUTPUT_CSV = "/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
+ROOT_DIR = "/home/juli/work/lab/project/sim-binary-shapes-2d/datos_simulaciones/simulation_data/R_2.0"
+OUTPUT_CSV = "/home/juli/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
 
 def path_val_to_float(val_str):
     if not val_str: return None
     return float(val_str.replace('p', '.'))
 
-def calcular_area_geometrica(r, sides):
-    if sides == 1: return np.pi * (r ** 2)
-    if sides == 4: return 4.0 * (r ** 2) 
-    if sides > 1: return (sides * (r ** 2) * np.sin(2 * np.pi / sides)) / 2
+def calcular_area_geometrica(r, sides=1):
+    """
+    IMPORTANTE: El simulador ajusta todos los polígonos para que su área 
+    sea igual a la de un disco de radio 'r'. Usamos siempre la fórmula 
+    del círculo para mantener la consistencia con la física de la simulación.
+    """
     return np.pi * (r ** 2)
 
 def parse_params(filepath, folder_path):

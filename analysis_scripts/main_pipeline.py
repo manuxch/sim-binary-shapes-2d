@@ -15,6 +15,8 @@ import generar_csv_arcos
 import arch_consolidator
 import histogram_arch
 
+# El filtro del chi lo aplica flow_analysis
+
 def main():
     print("="*60)
     print("   PIPELINE DE ANÁLISIS MEJORADO Y ARCOS   ")
@@ -24,7 +26,7 @@ def main():
     # 1. INDEXACIÓN: Crea la base de datos maestra
     # ==========================================================
     indexer.main()
-    idx_path = "/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
+    idx_path = "/home/juli/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
     if not os.path.exists(idx_path):
         print("[-] Error: No se pudo generar el índice. Abortando.")
         return
@@ -70,12 +72,12 @@ def main():
     #     idx_path=idx_path
     # )
     flow_analysis.main(
-        av_path="/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv",
+        av_path="/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv",
         idx_path=idx_path
     )
     
     tail_distribution_chi.main(
-        av_path="/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv",
+        av_path="/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv",
         idx_path=idx_path
     )
     # ==========================================================

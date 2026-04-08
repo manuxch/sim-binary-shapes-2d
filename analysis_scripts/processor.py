@@ -19,7 +19,7 @@ TIME_STEP = 0.001       # Paso de tiempo de integración
 
 # Carpetas de salida según tu estructura
 PREPRO_DIR = "0_mapa_prepro"
-DATA_DIR = "/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data"
+DATA_DIR = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data"
 
 def get_target_info(sim_row):
     """Identifica el ID del tipo de partícula con el radio máximo (Discos Grandes)"""
@@ -153,11 +153,11 @@ def main():
         if not os.path.exists(folder):
             os.makedirs(folder)
 
-    if not os.path.exists("/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"):
+    if not os.path.exists("/home/juli/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"):
         print("Error: Ejecuta primero indexer.py")
         return
 
-    df_idx = pd.read_csv("/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv")
+    df_idx = pd.read_csv("/home/juli/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv")
     print(f"--- PROCESANDO {len(df_idx)} SIMULACIONES (Grilla {GRID_NX}x{GRID_NY}) ---")
     
     # Uso de Pool para paralelizar la carga de trabajo
