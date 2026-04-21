@@ -14,3 +14,4 @@ __pycache__/
 .ipynb_checkpoints/
 datos_simulaciones/
 0_backup/
+processed_data_old/

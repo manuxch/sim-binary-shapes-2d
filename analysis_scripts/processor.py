@@ -96,7 +96,7 @@ def process_everything(sim_row):
                     avalanchas.append({'sim_hash': s_hash, 'tirada': sim_row['tirada'], 
                                      'duracion': last_any_t - start_t, 'tamano_big': count_big, 
                                      'total_mix': count_total, 'radio_salida': sim_row['Radio_salida']})
-
+        '''
         # --- 2. MAPAS DE DENSIDAD Y VELOCIDAD (NPZ) ---
         frames_dir = os.path.join(path, f"frames_{dir_id}")
         # Ordena archivos numéricamente para un cálculo de velocidad correcto
@@ -141,6 +141,7 @@ def process_everything(sim_row):
                                 d0=heatmaps[0], d1=heatmaps[1], 
                                 vx0=heatmaps[2], vy0=heatmaps[3],
                                 vx1=heatmaps[4], vy1=heatmaps[5])
+        '''
         return avalanchas
     except Exception as e:
         print(f"Error procesando {s_hash}: {e}")
@@ -149,7 +150,7 @@ def process_everything(sim_row):
 def main():
     """Ejecución centralizada con Multiprocessing"""
     # Crear carpetas de salida si no existen
-    for folder in [PREPRO_DIR, DATA_DIR]:
+    for folder in [DATA_DIR]:
         if not os.path.exists(folder):
             os.makedirs(folder)
 

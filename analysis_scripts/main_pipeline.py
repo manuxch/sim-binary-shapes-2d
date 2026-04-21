@@ -50,9 +50,11 @@ def main():
     # b. Consolidar todos los micro-csv en un Mega Dataset
     exito_cons = arch_consolidator.consolidate_arcs(idx_path=idx_path)
     
+    '''
     # c. Generar los histogramas usando el Mega Dataset
     if exito_cons:
         histogram_arch.plot_arch_histograms()
+    '''
 
     # ==========================================================
     # 4. ANÁLISIS ESTADÍSTICO TRADICIONAL
@@ -60,29 +62,32 @@ def main():
     print("\n[+] Ejecutando análisis estadístico global de flujo y avalanchas...")
     
     # Podés modificar fixed_val y target_system desde acá mismo
-    # flow_analysis.main(
-    #     mode='ratio_sweep',
-    #     fixed_val=0.01,
-    #     normalize=True,
-    #     target_system='Disco(G)-Disco(C)',  # <- Elegir el sistema (o poné None para ver todos)
-    #     av_path="../processed_data/1_avalanche_data/resultados_completos_esqueleto.csv",
-    #     idx_path=idx_path
-    # )
+    '''
     flow_analysis.main(
-        av_path="/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv",
+        mode='ratio_sweep',
+        fixed_val=0.01,
+        normalize=True,
+        target_system='Disco(G)-Disco(C)',  # <- Elegir el sistema (o poné None para ver todos)
+        av_path="../processed_data/1_avalanche_data/resultados_completos_esqueleto.csv",
         idx_path=idx_path
     )
-    
+    '''
+    flow_analysis.main()
+    '''    
     tail_distribution_chi.main(
         av_path="/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv",
         idx_path=idx_path
     )
+    '''
     # ==========================================================
     # 5. MAPAS ESPACIALES Y PERFILES
     # ==========================================================
+    '''
     print("\n[+] Generando mapas espaciales y perfiles de flujo...")
     temporal_chi.main()
-    
+    '''
+
+    '''
     for index, row in df_idx.iterrows():
         s_hash = row['sim_hash']
         t = row.get('tirada', 0)
@@ -93,7 +98,8 @@ def main():
             chi_val = row.get('chi', 0.1) 
             # plot_profiles.plot_perfil_horizontal(npz_file, altura_y=10) # Comentado si no lo pasaste
             density_map.plot_segregation_analysis(npz_file, chi_global=chi_val)
-
+    '''
+    '''
     # ==========================================================
     # 6. LIMPIEZA DE ARCHIVOS TEMPORALES
     # ==========================================================
@@ -105,6 +111,7 @@ def main():
             print(f" [-] Carpeta '{temp_folder}' eliminada correctamente.")
         except Exception as e:
             print(f" [!] Error al intentar borrar '{temp_folder}': {e}")
+    '''
             
     print("\n[+] PIPELINE COMPLETADO EXITOSAMENTE.")
 
