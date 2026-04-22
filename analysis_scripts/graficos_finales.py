@@ -135,7 +135,7 @@ def plot_disco_vs_area_ratio(df: pd.DataFrame):
     plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
     # plt.title(f"System: Disk-Disk - Orifice {main_dd}") # Opcional
     plt.legend(fontsize='small', loc='best')
-    plt.grid(True, alpha=0.2)
+    
     
     save_plot("2-discog-discoc-vs-area-ratio")
 
@@ -219,7 +219,7 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
     print(f"\n[+] Starting Arch Analysis (Target chi = 0.2)...")
     df_arcos = pd.read_csv(CFG.arcos_path)
     
-    # Mapeo de nombres
+    # Mapeo de nombres para compatibilidad
     name_map_raw = {'Disco-Disco': 'Disco(G)-Disco(C)', 'Tri-Disco': 'Tri(G)-Disco(C)', 
                     'Cuad-Disco': 'Cuad(G)-Disco(C)', 'Pent-Disco': 'Pent(G)-Disco(C)'}
     df_arcos['system_type_norm'] = df_arcos['system_type'].map(name_map_raw)
@@ -233,7 +233,7 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
     df_mix = filter_standard_size(df_filtered[df_filtered['chi'] > 0], 0.15, 0.1, system_col='sistema')
     if df_mix.empty: return
 
-    # --- Plot 6: Composition (Se mantiene para ver toda la curva) ---
+    # --- Plot 6: Composition ---
     df_mix['frac_arco'] = df_mix['Particulas_Tipo_1'] / df_mix['Total_Particulas_Arco']
     plt.figure()
     for sys_name in matrix_systems:
@@ -251,43 +251,45 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
     plt.legend(loc='upper left', fontsize='large')
     save_plot("6-arch-composition")
 
-    # --- NUEVO FILTRO: Específicamente para chi = 0.2 ---
+    # --- Filtro chi = 0.2 ---
     target_chi = 0.2
-    # Usamos un atol (tolerancia) de 0.05 por si tus chi son 0.19, 0.21, etc.
     df_target = df_mix[np.isclose(df_mix['chi'], target_chi, atol=0.05)].copy()
     
     if df_target.empty:
-        print(f"  [!] Advertencia: No se encontraron datos para chi ~ {target_chi}")
+        print(f"  [!] Advertencia: No hay datos para chi ~ {target_chi}")
         return
 
+    # Mapeo de colores estricto: { NombreSistema: ColorHex }
+    color_map = {sys: CFG.system_style[sys][0] for sys in matrix_systems}
+    
+    # Sistemas presentes y sus etiquetas en inglés para el eje X
     present = [s for s in matrix_systems if s in df_target['sistema'].unique()]
     new_ticks = [CFG.english_labels.get(s, s) for s in present]
-    # Creamos paleta de colores consistente con CFG.system_style
-    custom_palette = [CFG.system_style[s][0] for s in present]
 
-    # --- Plot 9: Tortuosidad (Solo para chi = 0.2) ---
+    # --- Plot 9: Tortuosidad ---
     plt.figure()
+    # Usamos hue='sistema' y palette=color_map para forzar la identidad del color
     ax = sns.violinplot(data=df_target, x='sistema', y='Tortuosidad', hue='sistema', 
-                        palette=custom_palette, inner='quartile', order=present, legend=False)
+                        palette=color_map, inner='quartile', order=present, legend=False)
     ax.set_xticks(range(len(present)))
     ax.set_xticklabels(new_ticks, rotation=15)
     plt.title(rf"Arch Tortuosity ($\chi = {target_chi}$)")
-    plt.xlabel(None); plt.ylabel("Tortuosity"); plt.grid(True, axis='y', alpha=0.3)
+    plt.xlabel(None); plt.ylabel("Tortuosity")
     save_plot(f"9-arch-tortuosity-chi-{target_chi}")
 
-    # --- Plot 10: Avalanche Boxplot (También actualizado para chi = 0.2 para ser consistente) ---
+    # --- Plot 10: Avalanche Boxplot ---
     if os.path.exists(CFG.raw_flow_path):
         df_raw = pd.read_csv(CFG.raw_flow_path)
         df_plot = pd.merge(df_raw, df_target[['sim_hash', 'sistema', 'chi']].drop_duplicates(), on='sim_hash')
         if not df_plot.empty:
             plt.figure()
+            # Aplicamos la misma lógica de color_map
             ax_box = sns.boxplot(data=df_plot, x='sistema', y='tamano_big', hue='sistema', 
-                                 palette=custom_palette, order=present)
+                                 palette=color_map, order=present, legend=False)
             ax_box.set_xticks(range(len(present)))
             ax_box.set_xticklabels(new_ticks, rotation=15)
             plt.title(rf"Avalanche Size ($\chi = {target_chi}$)")
             plt.xlabel(None); plt.yscale('log'); plt.ylabel("Avalanche Size (S)")
-            plt.grid(True, axis='y', alpha=0.3, which="both")
             save_plot(f"10-avalanche-boxplot-chi-{target_chi}")
             
 
@@ -312,29 +314,162 @@ def plot_geometric_effects_linear(df: pd.DataFrame, target_ar: float = 0.15):
     draw_lin(['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)', 'Disco(G)-Tri(C)'], "11a-additive-linear")
     draw_lin(['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)'], "11b-matrix-linear")
 
+
+
+
+# =============================================================================
+# Cambio en la estructura del Arco
+# =============================================================================
+def plot_arch_geometry_deep_dive(df_stats: pd.DataFrame):
+    """
+    Gráficos 12, 13 y 14.
+    - 12: Mantiene opacidad baja para resaltar la tendencia.
+    - 13: Escala lineal, sin límites (como pediste).
+    """
+    if not os.path.exists(CFG.arcos_path): return
+    print(f"[+] Generando Geometría de Arcos (chi = 0.2)...")
+    df_arcos = pd.read_csv(CFG.arcos_path)
+    
+    name_map_raw = {'Disco-Disco': 'Disco(G)-Disco(C)', 'Tri-Disco': 'Tri(G)-Disco(C)', 
+                    'Cuad-Disco': 'Cuad(G)-Disco(C)', 'Pent-Disco': 'Pent(G)-Disco(C)'}
+    df_arcos['sistema'] = df_arcos['system_type'].map(name_map_raw)
+    
+    matrix_systems = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)']
+    target_chi = 0.2
+    df_plot = df_arcos[(df_arcos['sistema'].isin(matrix_systems)) & 
+                       (np.isclose(df_arcos['chi'], target_chi, atol=0.05))].copy()
+    
+    if df_plot.empty: return
+
+    color_map = {sys: CFG.system_style[sys][0] for sys in matrix_systems}
+    present = [s for s in matrix_systems if s in df_plot['sistema'].unique()]
+    new_ticks = [CFG.english_labels.get(s, s) for s in present]
+
+    # --- Plot 12: Longitud vs Span (Opacidad baja para ver la tendencia) ---
+    plt.figure()
+    for sys_name in present:
+        data = df_plot[df_plot['sistema'] == sys_name]
+        sns.regplot(data=data, x='Span', y='Longitud', label=CFG.english_labels[sys_name],
+                    color=color_map[sys_name], scatter_kws={'alpha':0.05, 's':2}, line_kws={'lw':2.5})
+    plt.xlabel("Orifice Span ($L$)"); plt.ylabel("Arch Length ($s$)")
+    plt.legend(loc='upper left', fontsize='small')
+    save_plot(f"12-arch-length-vs-span-chi-{target_chi}")
+
+    # --- Plot 13: Aspect Ratio (Lineal y sin límites) ---
+    plt.figure()
+    ax = sns.violinplot(data=df_plot, x='sistema', y='Relacion_Aspecto', hue='sistema',
+                        palette=color_map, inner='quartile', order=present, legend=False)
+    ax.set_xticks(range(len(present))); ax.set_xticklabels(new_ticks, rotation=15)
+    plt.ylabel("Arch Aspect Ratio ($H/L$)")
+    save_plot(f"13-arch-aspect-ratio-chi-{target_chi}")
+
+    # --- Plot 14: Altura ---
+    plt.figure()
+    ax = sns.boxplot(data=df_plot, x='sistema', y='Altura', hue='sistema',
+                     palette=color_map, order=present, legend=False)
+    ax.set_xticks(range(len(present))); ax.set_xticklabels(new_ticks, rotation=15)
+    plt.ylabel("Arch Height ($H$)")
+    save_plot(f"14-arch-height-boxplot-chi-{target_chi}")
+
+
+def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
+    """
+    Gráfico 15.
+    - Se eliminan Altura y Longitud por redundancia.
+    - Se aplica filtro de N >= 20 para eliminar puntos con ruido estadístico.
+    """
+    if not os.path.exists(CFG.arcos_path): return
+    print(f"[+] Generando Evolución (vs Chi) - Solo métricas clave...")
+    df_arcos = pd.read_csv(CFG.arcos_path)
+    df_arcos['sistema'] = df_arcos['system_type'].map({'Disco-Disco': 'Disco(G)-Disco(C)', 'Tri-Disco': 'Tri(G)-Disco(C)', 
+                                                     'Cuad-Disco': 'Cuad(G)-Disco(C)', 'Pent-Disco': 'Pent(G)-Disco(C)'})
+    
+    mapping = df_stats[['sistema', 'r_ratio', 'area_ratio']].drop_duplicates()
+    df = pd.merge(df_arcos, mapping, left_on=['sistema', 'r_ratio'], right_on=['sistema', 'r_ratio'], how='left')
+    
+    matrix_systems = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)']
+    df_filtered = filter_standard_size(df[df['sistema'].isin(matrix_systems)], 0.15, 0.1, system_col='sistema')
+
+    # Solo las dos métricas que no son redundantes entre sí
+    metrics = {
+        'Relacion_Aspecto': 'Arch Aspect Ratio ($H/L$)',
+        'Tortuosidad': 'Arch Tortuosity'
+    }
+
+    for metric, ylabel in metrics.items():
+        plt.figure()
+        for sys_name in matrix_systems:
+            group = df_filtered[df_filtered['sistema'] == sys_name]
+            if group.empty: continue
+            
+            # Calculamos estadística por chi
+            summary = group.groupby('chi')[metric].agg(['mean', 'std', 'count']).reset_index()
+            
+            # FILTRO DE RUIDO AGRESIVO:
+            # Si el punto tiene menos de 20 arcos, lo ignoramos.
+            summary = summary[summary['count'] >= 20]
+            
+            if summary.empty: continue
+            
+            summary['sem'] = summary['std'] / np.sqrt(summary['count'])
+            color, marker = CFG.system_style.get(sys_name, ('black', 'o'))
+            plt.errorbar(summary['chi'], summary['mean'], yerr=summary['sem'], 
+                         fmt=f'{marker}-', color=color, label=CFG.english_labels.get(sys_name, sys_name), capsize=4)
+        
+        plt.xlabel(r"Concentration $\chi$"); plt.ylabel(ylabel); plt.legend(loc='best', fontsize='small')
+        save_plot(f"15-evolution-{metric.lower()}")
+
+
+
+
 # =============================================================================
 # MAIN
 # =============================================================================
 
 def main():
     print(f"[+] Starting integrated PDF pipeline...")
+    
+    # 1. Configuración inicial
     set_plot_fonts()
     if os.path.exists("figs.mplstyle"):
         plt.style.use('figs.mplstyle')
         plt.rcParams['text.usetex'] = False 
+    
     os.makedirs(CFG.out_dir, exist_ok=True)
+    
+    # 2. Carga de datos principales
     df = pd.read_csv(CFG.data_path)
+    
+    # Limpieza: Eliminamos sistemas que no forman parte del estudio actual
     df = df[df['sistema'] != 'Cuad(G)-Cuad(C)']
-    sistemas_meta = [('Disco(G)-Disco(C)', 'Disk'), ('Cuad(G)-Disco(C)', 'Square'), ('Pent(G)-Disco(C)', 'Pentagon')]
+    
+    # Definición de sistemas para los barridos (sweeps)
+    sistemas_meta = [
+        ('Disco(G)-Disco(C)', 'Disk'), 
+        ('Cuad(G)-Disco(C)', 'Square'), 
+        ('Pent(G)-Disco(C)', 'Pentagon')
+    ]
 
-    # plot_puros_vs_orificio(df)
-    plot_disco_vs_area_ratio(df)
-    plot_sweeps_by_system(df, sistemas_meta)
-    plot_geometric_effects(df)
-    plot_geometric_effects_raw(df)
-    plot_arch_analysis(df)
-    plot_geometric_effects_linear(df)
-    print(f"[+] All plots generated successfully in {CFG.out_dir}")
+    # =========================================================================
+    # EJECUCIÓN DE MÓDULOS DE PLOTTING
+    # =========================================================================
+
+    # --- Análisis de Flujo y Tamaño de Avalanchas ---
+    # plot_puros_vs_orificio(df) # Opcional: Solo si necesitas la referencia pura
+    plot_disco_vs_area_ratio(df)     # Plot 2: ln(S+1) vs Ra (el que pediste recién)
+    plot_sweeps_by_system(df, sistemas_meta) # Plot 4: Curvas de atasco por sistema
+    plot_geometric_effects(df)       # Plot 5a/b: Efectos normalizados
+    plot_geometric_effects_raw(df)   # Plot 5c: Efecto matriz (log-size)
+    plot_geometric_effects_linear(df)# Plot 11: Escala lineal comparativa
+
+    # --- Análisis de Arcos (Morfología y Estructura) ---
+    # Nota: Estas funciones leen internamente CFG.arcos_path
+    plot_arch_analysis(df)           # Plot 6, 9, 10: Composición, Tortuosidad y Avalanchas (chi=0.2)
+    plot_arch_geometry_deep_dive(df) # Plot 12, 13, 14: Geometría avanzada (chi=0.2)
+    plot_arch_evolution_vs_chi(df)   # Plot 15: Evolución de métricas vs concentración
+    
+    print(f"\n[+] Pipeline finished.")
+    print(f"[+] All plots generated successfully in: {CFG.out_dir}")
 
 if __name__ == "__main__": 
     main()

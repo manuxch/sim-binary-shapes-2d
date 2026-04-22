@@ -252,7 +252,7 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id):
     print(f"✅ Imagen guardada con éxito en:\n   {output_path}")
 
 if __name__ == "__main__":
-    CARPETA_SIMULACION = "/home/juli/lab/lab/project/sim-binary-shapes-2d/datos_simulaciones/simulation_data/R_2.0/BARRIDO_WIDTHS_TRIANGLE_DISK/Ratio_0p1_Chi_0p2_W_2p0" 
-    ID_DEL_ATASCO = "00001" 
+    CARPETA_SIMULACION = "/home/juli/work/lab/project/sim-binary-shapes-2d/datos_simulaciones/simulation_data/R_2.0/BARRIDO_WIDTHS_TRIANGLE_DISK/Ratio_0p1_Chi_0p12_W_2p0" 
+    ID_DEL_ATASCO = "00136" 
     
     graficar_arco_y_fuerzas(CARPETA_SIMULACION, ID_DEL_ATASCO)
