@@ -5,104 +5,106 @@ import seaborn as sns
 import os
 import matplotlib
 
-matplotlib.use('Agg') # Para ejecución en servidor/headless
+matplotlib.use('Agg')
 
-# =============================================================================
-# CONFIGURACIÓN DE RUTAS
-# =============================================================================
 MEGA_DATASET_PATH = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_arcos.csv"
 OUTPUT_DIR = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/4_arch_histograms"
 
+
+def ensure_nominal_columns(df):
+    if 'area_ratio_nominal' not in df.columns and 'area_ratio' in df.columns:
+        df['area_ratio_nominal'] = df['area_ratio'].round(3)
+    if 'r_ratio_nominal' not in df.columns and 'r_ratio' in df.columns:
+        df['r_ratio_nominal'] = df['r_ratio'].round(2)
+    return df
+
+
 def plot_arch_histograms(dataset_path=MEGA_DATASET_PATH, output_dir=OUTPUT_DIR):
-    print(f"\n[+] Generando análisis avanzado de composición de arcos (Multivariable)...")
-    
+    print("\n[+] Generando análisis avanzado de composición de arcos...")
+
     if not os.path.exists(dataset_path):
         print(f"  -> [!] Error: No se encontró el dataset en {dataset_path}")
         return
 
-    # 1. Cargar datos (Usamos los nombres de columna del nuevo consolidator)
     df = pd.read_csv(dataset_path)
-    
-    # Verificación de columnas (Senior safety check)
-    required_cols = ['system_type', 'chi', 'r_ratio', 'Particulas_Tipo_1', 'Total_Particulas_Arco']
-    if not all(col in df.columns for col in required_cols):
-        print(f"  -> [!] Error: El CSV no tiene las columnas necesarias: {required_cols}")
+    df = ensure_nominal_columns(df)
+
+    required_cols = [
+        'system_type',
+        'chi',
+        'area_ratio_nominal',
+        'Particulas_Tipo_1',
+        'Total_Particulas_Arco',
+    ]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        print(f"  -> [!] Error: faltan columnas: {missing}")
         return
 
     df = df[df['Total_Particulas_Arco'] > 0].copy()
     df['Fraccion_Tipo_1'] = df['Particulas_Tipo_1'] / df['Total_Particulas_Arco']
 
-    # 2. Organización de carpetas
     os.makedirs(output_dir, exist_ok=True)
 
-    # 3. Análisis por Sistema, Chi y Ratio (El corazón del cambio)
-    # Agrupamos por las 3 variables para no mezclar datos de distintos radios
-    grouped = df.groupby(['system_type', 'chi', 'r_ratio'])
+    grouped = df.groupby(['system_type', 'chi', 'area_ratio_nominal'], dropna=False)
     graficos_generados = 0
 
-    for (sistema, chi, ratio), df_plot in grouped:
-        sis_safe = sistema.replace(" ", "_").replace("(", "").replace(")", "")
+    for (sistema, chi, area_ratio_nominal), df_plot in grouped:
+        sis_safe = str(sistema).replace(" ", "_").replace("(", "").replace(")", "")
         chi_safe = str(chi).replace(".", "p")
-        rat_safe = str(ratio).replace(".", "p")
-        
-        # Creamos subcarpeta por sistema para no tener miles de archivos juntos
+        ar_safe = str(area_ratio_nominal).replace(".", "p")
+
         subfolder = os.path.join(output_dir, sis_safe)
         os.makedirs(subfolder, exist_ok=True)
 
-        # --- GRÁFICO 1: Histograma de Composición (Conteo Absoluto) ---
         plt.figure(figsize=(10, 6))
         bins = np.arange(0, df_plot['Total_Particulas_Arco'].max() + 2) - 0.5
-        
+
         plt.hist(df_plot['Particulas_Tipo_0'], bins=bins, alpha=0.5, label='Grandes (Matriz)', color='#1f77b4')
         plt.hist(df_plot['Particulas_Tipo_1'], bins=bins, alpha=0.7, label='Chicas (Aditivo)', color='#ff7f0e')
-        
-        plt.title(f"Composición de Arcos: {sistema}\n$\\chi$={chi} | Ratio={ratio}", fontsize=13)
+
+        plt.title(f"Composición de Arcos: {sistema}\n$\\chi$={chi} | AR nominal={area_ratio_nominal}", fontsize=13)
         plt.xlabel("Cantidad de partículas en el arco")
         plt.ylabel("Frecuencia")
         plt.xticks(np.arange(0, df_plot['Total_Particulas_Arco'].max() + 1))
         plt.legend()
         plt.grid(axis='y', linestyle='--', alpha=0.4)
-        
-        plt.savefig(os.path.join(subfolder, f"hist_{chi_safe}_R{rat_safe}.png"), dpi=200)
+        plt.savefig(os.path.join(subfolder, f"hist_chi{chi_safe}_AR{ar_safe}.png"), dpi=200)
         plt.close()
 
-        # --- GRÁFICO 2: Fracción vs Tamaño del Arco ---
         plt.figure(figsize=(9, 5))
         sns.boxplot(data=df_plot, x='Total_Particulas_Arco', y='Fraccion_Tipo_1', color='lightgrey', showfliers=False)
         sns.stripplot(data=df_plot, x='Total_Particulas_Arco', y='Fraccion_Tipo_1', alpha=0.3, jitter=True)
-        
         plt.axhline(chi, color='red', linestyle='--', label=fr'Nominal $\chi$={chi}')
-        plt.title(f"Fracción de Aditivos por Tamaño de Arco\n{sistema} | Ratio={ratio}")
+        plt.title(f"Fracción de Aditivos por Tamaño de Arco\n{sistema} | AR nominal={area_ratio_nominal}")
         plt.ylim(-0.05, 1.05)
         plt.legend()
-        
-        plt.savefig(os.path.join(subfolder, f"fraccion_{chi_safe}_R{rat_safe}.png"), dpi=200)
+        plt.savefig(os.path.join(subfolder, f"fraccion_chi{chi_safe}_AR{ar_safe}.png"), dpi=200)
         plt.close()
-        
+
         graficos_generados += 2
 
-    # 4. GRÁFICO DE TENDENCIAS (Barrido de Radios a Chi Fijo)
-    # Este es el gráfico que pediste específicamente
-    print("  -> Generando comparativa de barrido de radios...")
-    for (sistema, chi), df_trend in df.groupby(['system_type', 'chi']):
+    print("  -> Generando comparativas de barrido de área...")
+    for (sistema, chi), df_trend in df.groupby(['system_type', 'chi'], dropna=False):
+        stats = df_trend.groupby('area_ratio_nominal')['Fraccion_Tipo_1'].agg(['mean', 'std']).reset_index()
+        stats = stats.sort_values('area_ratio_nominal')
+
         plt.figure(figsize=(10, 6))
-        
-        # Calculamos la media de fracción para cada ratio de tamaño
-        stats = df_trend.groupby('r_ratio')['Fraccion_Tipo_1'].agg(['mean', 'std']).reset_index()
-        
-        plt.errorbar(stats['r_ratio'], stats['mean'], yerr=stats['std'], fmt='o-', capsize=5, label='Composición Media')
-        plt.axhline(chi, color='red', linestyle=':', label=fr'Mezcla Nominal ($\chi$={chi})')
-        
-        plt.title(f"Composición de Arcos vs Tamaño de Aditivo\n{sistema} | $\\chi$ fijo = {chi}")
-        plt.xlabel("Ratio de Radios ($R_{large}/R_{small}$)")
-        plt.ylabel("Fracción de Aditivos en Arcos")
+        plt.errorbar(stats['area_ratio_nominal'], stats['mean'], yerr=stats['std'], fmt='o-', capsize=5, label='Composición media')
+        plt.axhline(chi, color='red', linestyle=':', label=fr'Mezcla nominal ($\chi$={chi})')
+        plt.title(f"Composición de Arcos vs Area Ratio nominal\n{sistema} | $\chi$ fijo = {chi}")
+        plt.xlabel("Area Ratio nominal")
+        plt.ylabel("Fracción de aditivos en arcos")
         plt.grid(True, alpha=0.3)
         plt.legend()
-        
-        plt.savefig(os.path.join(output_dir, f"tendencia_radio_{sistema}_{str(chi).replace('.','p')}.png"))
+
+        sys_safe = str(sistema).replace(" ", "_").replace("-", "_")
+        chi_safe = str(chi).replace('.', 'p')
+        plt.savefig(os.path.join(output_dir, f"tendencia_area_{sys_safe}_chi{chi_safe}.png"), dpi=200)
         plt.close()
 
-    print(f"  -> ¡Éxito! Se generaron {graficos_generados} gráficos individuales y comparativas de tendencia.")
+    print(f"  -> Éxito: se generaron {graficos_generados} gráficos individuales.")
+
 
 if __name__ == "__main__":
     plot_arch_histograms()

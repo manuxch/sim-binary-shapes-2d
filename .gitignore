@@ -15,3 +15,4 @@ __pycache__/
 datos_simulaciones/
 0_backup/
 processed_data_old*/
+*.mp4
