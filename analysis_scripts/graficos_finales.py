@@ -247,30 +247,56 @@ def plot_disco_vs_area_ratio(df: pd.DataFrame):
     save_plot("2-discog-discoc-vs-area-ratio")
 
 
-def plot_sweeps_by_system(df: pd.DataFrame, target_systems: List[Tuple[str, str]]):
-    print("  -> Plotting 4: Clogging Curves (Sweeps)...")
+def plot_sweeps_by_system(
+    df: pd.DataFrame,
+    target_systems: List[Tuple[str, str]],
+    zoom: bool = False,
+    xlim: Tuple[float, float] = (0.05, 0.15),
+):
+    if zoom:
+        print("  -> Plotting 4 zoom: Clogging Curves (chi 0.05 - 0.15)...")
+    else:
+        print("  -> Plotting 4: Clogging Curves (Sweeps)...")
+
+    # Chis que NO querés mostrar en el gráfico general.
+    # La versión zoom sí los conserva.
+    excluded_chis_no_zoom = [0.07, 0.075, 0.085, 0.09, 0.095, 0.105, 0.11, 0.15]
 
     for system_name, _ in target_systems:
         system_id = system_name.lower().replace('(', '').replace(')', '').replace('_', '-').replace(' ', '-')
         df_mix = df[(df['sistema'] == system_name) & (df['chi'] > 0.0)].copy()
+
+        if df_mix.empty:
+            continue
+
+        # En el gráfico SIN zoom, quitamos los chi intermedios.
+        # En el gráfico CON zoom, los dejamos para ver el detalle.
+        if not zoom:
+            mask_excluded = np.zeros(len(df_mix), dtype=bool)
+            for chi_excl in excluded_chis_no_zoom:
+                mask_excluded |= np.isclose(df_mix['chi'].astype(float), chi_excl, atol=1e-6)
+
+            df_mix = df_mix[~mask_excluded].copy()
+
         if df_mix.empty:
             continue
 
         main_dd = df_mix['D_d_sq'].value_counts().idxmax()
         p0, e0 = get_pure_ref(df, system_name, main_dd, 'log_S')
+
         if p0 is None:
             continue
 
         plt.figure()
 
-        # Se usan objetivos nominales. Para cada objetivo se grafica el valor nominal disponible más cercano.
         targets = [0.1, 0.2, 0.4, 0.5]
+
         for target in targets:
             grp_raw = select_by_nominal_ar(df_mix, target, atol=0.06)
+
             if grp_raw.empty:
                 continue
 
-            # Si hay más de un AR dentro de la tolerancia, elegimos el más cercano al objetivo.
             available = np.sort(grp_raw[AR_COL].dropna().unique())
             chosen = available[np.argmin(np.abs(available - target))]
             grp_raw = grp_raw[np.isclose(grp_raw[AR_COL], chosen, atol=1e-12)]
@@ -281,6 +307,7 @@ def plot_sweeps_by_system(df: pd.DataFrame, target_systems: List[Tuple[str, str]
                        .reset_index()
                        .sort_values('chi')
             )
+
             if grp.empty:
                 continue
 
@@ -288,13 +315,24 @@ def plot_sweeps_by_system(df: pd.DataFrame, target_systems: List[Tuple[str, str]
             y = [p0] + grp['log_S'].tolist()
             err = [e0] + grp['log_S_err'].tolist()
 
-            plt.errorbar(x, y, yerr=err, fmt='s-', label=rf"AR = {chosen:.3g}", capsize=3)
+            plt.errorbar(
+                x, y, yerr=err,
+                fmt='s-',
+                label=rf"AR = {chosen:.3g}",
+                capsize=3
+            )
+
             print(f"\nSistema: {system_name}\n  label AR {target} -> {AR_COL} real {chosen:.4f}")
 
         plt.xlabel(r"Concentration $\chi$")
         plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
         plt.legend(loc='upper left')
-        save_plot(f"4-{system_id}-clogging-curves")
+
+        if zoom:
+            plt.xlim(*xlim)
+            save_plot(f"4-{system_id}-clogging-curves-zoom-chi-0p05-0p15")
+        else:
+            save_plot(f"4-{system_id}-clogging-curves")
 
 
 def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15):
@@ -654,6 +692,7 @@ def main():
     # plot_puros_vs_orificio(df)
     plot_disco_vs_area_ratio(df)
     plot_sweeps_by_system(df, sistemas_meta)
+    plot_sweeps_by_system(df, sistemas_meta, zoom=True, xlim=(0.05, 0.15))
     plot_geometric_effects(df)
     plot_geometric_effects_raw(df)
     plot_geometric_effects_linear(df)
