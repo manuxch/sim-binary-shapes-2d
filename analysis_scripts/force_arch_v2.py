@@ -12,10 +12,13 @@ Puntos principales:
 - Escribe resultados incrementalmente.
 - Resume fuerza normal por atasco y luego por configuracion.
 - Opcionalmente guarda muestras de fuerzas normales para violin plots.
+- Calcula un ROI dinámico basado en las coordenadas extremas del arco, 
+  excluyendo las partículas que forman parte de este.
 
 Definiciones:
 - bulk: todos los contactos grano-grano del atasco.
 - arco: contactos arco-arco, es decir, ambos granos pertenecen al arco detectado.
+- roi: región espacial delimitada por el arco, excluyendo las partículas del arco mismo.
 
 Salidas:
 - resumen_fuerza_normal_por_atasco.csv
@@ -323,6 +326,9 @@ def aggregate_contacts_for_graph(df_contacts, particles):
     if df.empty:
         return pd.DataFrame()
 
+    # Tomamos valor absoluto de la tangencial para no cancelar vectores opuestos
+    df["f_tan_abs"] = df["f_tan"].abs()
+
     grouped = (
         df
         .groupby(["pair_a", "pair_b"], as_index=False)
@@ -330,6 +336,7 @@ def aggregate_contacts_for_graph(df_contacts, particles):
             px=("px", "mean"),
             py=("py", "mean"),
             f_norm=("f_norm", "sum"),
+            f_tan=("f_tan_abs", "sum") # Guardamos como f_tan para simplificar
         )
     )
 
@@ -373,27 +380,34 @@ def prepare_force_dataset(df_contacts, particles, contact_mode="pair"):
     if df.empty:
         return df
 
+    df["f_tan_abs"] = df["f_tan"].abs()
+
     if contact_mode == "point":
         out = (
-            df[["pair_a", "pair_b", "f_norm"]]
+            df[["pair_a", "pair_b", "f_norm", "f_tan_abs", "px", "py"]]
             .copy()
-            .rename(columns={"pair_a": "id_a", "pair_b": "id_b"})
+            .rename(columns={"pair_a": "id_a", "pair_b": "id_b", "f_tan_abs": "f_tan"})
         )
 
     elif contact_mode == "pair":
         out = (
             df
             .groupby(["pair_a", "pair_b"], as_index=False)
-            .agg(f_norm=("f_norm", "sum"))
+            .agg(
+                f_norm=("f_norm", "sum"), 
+                f_tan=("f_tan_abs", "sum"),
+                px=("px", "mean"), # Centroide del contacto
+                py=("py", "mean")  # Centroide del contacto
+            )
             .rename(columns={"pair_a": "id_a", "pair_b": "id_b"})
         )
-
     else:
         raise ValueError("contact_mode debe ser 'pair' o 'point'.")
 
     out["id_a"] = out["id_a"].astype(np.int64)
     out["id_b"] = out["id_b"].astype(np.int64)
     out["f_norm"] = out["f_norm"].astype(float)
+    out["f_tan"] = out["f_tan"].astype(float)
 
     return out
 
@@ -416,41 +430,87 @@ def std_or_nan(values):
     return float(np.nanstd(values, ddof=1))
 
 
-def summarize_fn_one_jam(df_forces, arco_path):
+def summarize_fn_one_jam(df_forces, arco_path, particles):
     ids_arco = set(int(x) for x in arco_path)
 
     f_norm = df_forces["f_norm"].to_numpy(dtype=float)
+    f_tan = df_forces["f_tan"].to_numpy(dtype=float)
+    px = df_forces["px"].to_numpy(dtype=float)
+    py = df_forces["py"].to_numpy(dtype=float)
+    
     in_a = df_forces["id_a"].isin(ids_arco).to_numpy()
     in_b = df_forces["id_b"].isin(ids_arco).to_numpy()
 
     mask_arco = in_a & in_b
     f_arco = f_norm[mask_arco]
+    ft_arco = f_tan[mask_arco]
 
-    return {
+    res = {
         "N_contactos_bulk": int(f_norm.size),
         "mean_Fn_bulk": mean_or_nan(f_norm),
         "std_Fn_bulk": std_or_nan(f_norm),
+        "mean_Ft_bulk": mean_or_nan(f_tan),
+        "std_Ft_bulk": std_or_nan(f_tan),
 
         "N_contactos_arco": int(f_arco.size),
         "mean_Fn_arco": mean_or_nan(f_arco),
         "std_Fn_arco": std_or_nan(f_arco),
+        "mean_Ft_arco": mean_or_nan(ft_arco),
+        "std_Ft_arco": std_or_nan(ft_arco),
     }
+
+    # --- NUEVO: ROI Dinámico basado en el arco ---
+    # Extraemos coordenadas X e Y de las partículas que conforman el arco
+    y_arco = [particles[pid]["pos"][1] for pid in ids_arco if pid in particles]
+    x_arco = [particles[pid]["pos"][0] for pid in ids_arco if pid in particles]
+
+    if y_arco and x_arco:
+        # La región queda definida por los extremos (más baja/alta y anchos) del arco
+        ymin, ymax = min(y_arco), max(y_arco)
+        xmin, xmax = min(x_arco), max(x_arco)
+
+        # Máscara espacial (rectángulo)
+        mask_roi_spatial = (px >= xmin) & (px <= xmax) & (py >= ymin) & (py <= ymax)
+
+        # Máscara para excluir contactos de partículas del arco. 
+        # (in_a | in_b) es True si alguna de las dos partículas del contacto pertenece al arco.
+        # ~ invierte la condición: solo True cuando NINGUNA de las dos pertenece al arco.
+        mask_exclude_arco = ~(in_a | in_b)
+        
+        mask_roi = mask_roi_spatial & mask_exclude_arco
+        
+        f_norm_roi = f_norm[mask_roi]
+        f_tan_roi = f_tan[mask_roi]
+        n_roi = int(f_norm_roi.size)
+
+        sem_fn_roi = float(np.nanstd(f_norm_roi, ddof=1) / np.sqrt(n_roi)) if n_roi > 1 else np.nan
+        sem_ft_roi = float(np.nanstd(f_tan_roi, ddof=1) / np.sqrt(n_roi)) if n_roi > 1 else np.nan
+
+        res.update({
+            "N_contactos_roi": n_roi,
+            "mean_Fn_roi": mean_or_nan(f_norm_roi),
+            "std_Fn_roi": std_or_nan(f_norm_roi),
+            "sem_Fn_roi": sem_fn_roi,
+            "mean_Ft_roi": mean_or_nan(f_tan_roi),
+            "std_Ft_roi": std_or_nan(f_tan_roi),
+            "sem_Ft_roi": sem_ft_roi,
+        })
+    else:
+        # Relleno de seguridad con NaN en caso de datos anómalos
+        res.update({
+            "N_contactos_roi": np.nan, "mean_Fn_roi": np.nan, "std_Fn_roi": np.nan, "sem_Fn_roi": np.nan,
+            "mean_Ft_roi": np.nan, "std_Ft_roi": np.nan, "sem_Ft_roi": np.nan,
+        })
+
+    return res
 
 
 def sample_force_values(df_forces, arco_path, sim_row, jam_id, sample_cfg):
-    """
-    Devuelve filas para violin plots.
-
-    bulk:
-        muestrea hasta bulk_sample_per_jam contactos.
-        Si bulk_sample_per_jam = 0, guarda todos.
-
-    arco:
-        guarda todos los contactos arco-arco salvo que arco_sample_per_jam > 0.
-    """
     ids_arco = set(int(x) for x in arco_path)
 
     f_norm = df_forces["f_norm"].to_numpy(dtype=float)
+    f_tan = df_forces["f_tan"].to_numpy(dtype=float) 
+    
     in_a = df_forces["id_a"].isin(ids_arco).to_numpy()
     in_b = df_forces["id_b"].isin(ids_arco).to_numpy()
 
@@ -474,19 +534,9 @@ def sample_force_values(df_forces, arco_path, sim_row, jam_id, sample_cfg):
 
     meta = {}
     for col in [
-        "sim_hash",
-        "config_hash",
-        "category",
-        "system_type",
-        "geometry_label",
-        "chi",
-        "area_ratio",
-        "area_ratio_nominal",
-        "r_ratio",
-        "r_ratio_nominal",
-        "r_small",
-        "area_small",
-        "tirada",
+        "sim_hash", "config_hash", "category", "system_type",
+        "geometry_label", "chi", "area_ratio", "area_ratio_nominal",
+        "r_ratio", "r_ratio_nominal", "r_small", "area_small", "tirada",
     ]:
         if col in sim_row:
             meta[col] = sim_row[col]
@@ -498,6 +548,7 @@ def sample_force_values(df_forces, arco_path, sim_row, jam_id, sample_cfg):
         row["Atasco_ID"] = jam_id
         row["grupo"] = "bulk"
         row["f_norm"] = float(f_norm[i])
+        row["f_tan"] = float(f_tan[i]) 
         rows.append(row)
 
     for i in idx_arco:
@@ -505,6 +556,7 @@ def sample_force_values(df_forces, arco_path, sim_row, jam_id, sample_cfg):
         row["Atasco_ID"] = jam_id
         row["grupo"] = "arco"
         row["f_norm"] = float(f_norm[i])
+        row["f_tan"] = float(f_tan[i]) 
         rows.append(row)
 
     return rows
@@ -585,7 +637,8 @@ def process_one_jam_task(task):
                 "error": "Sin contactos validos para fuerzas",
             }
 
-        summary = summarize_fn_one_jam(df_forces, arco_path)
+        # Enviamos 'particles' para el cálculo dinámico del ROI
+        summary = summarize_fn_one_jam(df_forces, arco_path, particles)
 
         for col, value in sim_row.items():
             if col != "path":
@@ -961,17 +1014,40 @@ def make_configuration_summary(summary_path, out_path):
             r_ratio_real_min=("r_ratio", "min"),
             r_ratio_real_max=("r_ratio", "max"),
 
+            # --- BULK: Normal ---
             mean_Fn_bulk=("mean_Fn_bulk", "mean"),
             std_between_jams_Fn_bulk=("mean_Fn_bulk", "std"),
             sem_Fn_bulk=("mean_Fn_bulk", sem_from_series),
             mean_N_contactos_bulk=("N_contactos_bulk", "mean"),
 
+            # --- BULK: Tangencial ---
+            mean_Ft_bulk=("mean_Ft_bulk", "mean"),
+            std_between_jams_Ft_bulk=("mean_Ft_bulk", "std"),
+            sem_Ft_bulk=("mean_Ft_bulk", sem_from_series),
+
+            # --- ARCO: Normal ---
             mean_Fn_arco=("mean_Fn_arco", "mean"),
             std_between_jams_Fn_arco=("mean_Fn_arco", "std"),
             sem_Fn_arco=("mean_Fn_arco", sem_from_series),
             mean_N_contactos_arco=("N_contactos_arco", "mean"),
-
             mean_n_particulas_arco=("n_particulas_arco", "mean"),
+
+            # --- ARCO: Tangencial ---
+            mean_Ft_arco=("mean_Ft_arco", "mean"),
+            std_between_jams_Ft_arco=("mean_Ft_arco", "std"),
+            sem_Ft_arco=("mean_Ft_arco", sem_from_series),
+
+            # --- ROI: Normal ---
+            mean_Fn_roi=("mean_Fn_roi", "mean"),
+            std_between_jams_Fn_roi=("mean_Fn_roi", "std"),
+            sem_Fn_roi=("mean_Fn_roi", sem_from_series),
+
+            # --- ROI: Tangencial ---
+            mean_Ft_roi=("mean_Ft_roi", "mean"),
+            std_between_jams_Ft_roi=("mean_Ft_roi", "std"),
+            sem_Ft_roi=("mean_Ft_roi", sem_from_series),
+            
+            mean_N_contactos_roi=("N_contactos_roi", "mean"),
         )
         .reset_index()
     )
@@ -1021,7 +1097,7 @@ def run_analysis(args):
     workers = choose_workers(args.workers)
 
     print("=" * 72)
-    print(" ANALISIS DE FUERZA NORMAL PROMEDIO: BULK vs ARCO")
+    print(" ANALISIS DE FUERZA NORMAL PROMEDIO: BULK vs ARCO (ROI DINAMICO)")
     print("=" * 72)
     print(f"[+] Simulaciones seleccionadas: {len(df_idx)}")
     print(f"[+] Workers:                    {workers}")
