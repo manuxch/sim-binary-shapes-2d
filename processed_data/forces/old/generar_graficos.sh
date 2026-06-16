@@ -56,9 +56,7 @@ for archivo in "${archivos[@]}"; do
             
             # Graficamos forzando los tipos de punto (pt) y un tamaño ligeramente mayor (ps 0.8)
             plot datos using 5:22 smooth unique with linespoints pt $pt_arco ps 0.8 title 'Fn Arco', \
-                 '' using 5:27 smooth unique with linespoints pt $pt_arco ps 0.8 title 'Ft Arco', \
-                 '' using 5:30 smooth unique with linespoints pt $pt_roi ps 0.8 title 'Fn ROI', \
-                 '' using 5:33 smooth unique with linespoints pt $pt_roi ps 0.8 title 'Ft ROI'
+                 '' using 5:30 smooth unique with linespoints pt $pt_roi ps 0.8 title 'Fn ROI'
 EOF
     done
 done
