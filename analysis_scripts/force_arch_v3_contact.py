@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-force_arch_v2.py
+force_arch_v3.py
 
 Análisis de fuerza normal promedio en bulk, arco y ROI, con visualización espacial.
 
