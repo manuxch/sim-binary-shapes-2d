@@ -257,7 +257,6 @@ def summarize_fn_one_jam(df_forces, arco_path, particles):
     min_r = min(radios_simulacion) if radios_simulacion else 0.0
     
     # El umbral dinámico se sitúa exactamente a la mitad entre la partícula más grande y la más chica.
-    # Esto ignora por completo el "ruido numérico" de los decimales de las coordenadas de los polígonos.
     umbral_r = (max_r + min_r) / 2.0
     
     # Asignar radios y calcular el tipo geométrico del contacto (BB, BS, SS)
@@ -273,6 +272,10 @@ def summarize_fn_one_jam(df_forces, arco_path, particles):
     f_tan = df_forces["f_tan"].to_numpy(dtype=float)
     py = df_forces["py"].to_numpy(dtype=float)
     tipo_contacto = df_forces["tipo_contacto"].to_numpy()
+    
+    # NUEVO: Extraemos los arreglos de IDs para contar partículas únicas
+    id_a_arr = df_forces["id_a"].to_numpy()
+    id_b_arr = df_forces["id_b"].to_numpy()
     
     in_a = df_forces["id_a"].isin(ids_arco).to_numpy()
     in_b = df_forces["id_b"].isin(ids_arco).to_numpy()
@@ -290,13 +293,22 @@ def summarize_fn_one_jam(df_forces, arco_path, particles):
         
     mask_bulk = ~mask_arco & ~mask_roi
     
-    # Función de ayuda para calcular los estadísticos de cada región manteniendo Numpy para velocidad extrema
+    # Función de ayuda para calcular los estadísticos de cada región
     def calc_stats(mask, prefix):
         fn = f_norm[mask]
         ft = f_tan[mask]
-        n = int(fn.size)
+        n = int(fn.size) # n es el número de contactos
+        
+        # NUEVO: Calculamos cuántas partículas únicas participan en estos contactos
+        if n > 0:
+            ids_involucrados = np.concatenate([id_a_arr[mask], id_b_arr[mask]])
+            n_particulas = len(np.unique(ids_involucrados))
+        else:
+            n_particulas = 0
+
         d = {
             f"N_contactos_{prefix}": n,
+            f"N_particulas_{prefix}": n_particulas, # NUEVO: Guardamos el número de partículas
             f"mean_Fn_{prefix}": mean_or_nan(fn),
             f"std_Fn_{prefix}": std_or_nan(fn),
             f"mean_Ft_{prefix}": mean_or_nan(ft),
@@ -316,9 +328,6 @@ def summarize_fn_one_jam(df_forces, arco_path, particles):
             d[f"N_contactos_{prefix}_{tipo}"] = n_tipo
             d[f"f_norm_{prefix}_{tipo}"] = float(np.sum(fn_tipo)) if n_tipo > 0 else 0.0
             d[f"mean_Fn_{prefix}_{tipo}"] = mean_or_nan(fn_tipo)
-            
-            # --- NUEVA LÍNEA: Contribución exacta al promedio de este atasco ---
-            # Dividimos la suma de la fuerza de esta geometría por 'n' (contactos totales del arco)
             d[f"contrib_mean_Fn_{prefix}_{tipo}"] = float(np.sum(fn_tipo)) / n if n > 0 else 0.0
             
         return d
@@ -675,6 +684,7 @@ def make_configuration_summary(summary_path, out_path):
         "std_between_jams_Fn_bulk": ("mean_Fn_bulk", "std"), 
         "sem_Fn_bulk": ("mean_Fn_bulk", sem_from_series), 
         "mean_N_contactos_bulk": ("N_contactos_bulk", "mean"),
+        "mean_N_particulas_bulk": ("N_particulas_bulk", "mean"), # NUEVO
         "mean_Ft_bulk": ("mean_Ft_bulk", "mean"), 
         "std_between_jams_Ft_bulk": ("mean_Ft_bulk", "std"), 
         "sem_Ft_bulk": ("mean_Ft_bulk", sem_from_series),
@@ -683,7 +693,8 @@ def make_configuration_summary(summary_path, out_path):
         "std_between_jams_Fn_arco": ("mean_Fn_arco", "std"), 
         "sem_Fn_arco": ("mean_Fn_arco", sem_from_series),
         "mean_N_contactos_arco": ("N_contactos_arco", "mean"), 
-        "mean_n_particulas_arco": ("n_particulas_arco", "mean"),
+        "mean_N_particulas_arco_contactos": ("N_particulas_arco", "mean"), # NUEVO
+        "mean_n_particulas_arco_topologico": ("n_particulas_arco", "mean"), 
         "mean_Ft_arco": ("mean_Ft_arco", "mean"), 
         "std_between_jams_Ft_arco": ("mean_Ft_arco", "std"), 
         "sem_Ft_arco": ("mean_Ft_arco", sem_from_series),
@@ -694,7 +705,8 @@ def make_configuration_summary(summary_path, out_path):
         "mean_Ft_roi": ("mean_Ft_roi", "mean"), 
         "std_between_jams_Ft_roi": ("mean_Ft_roi", "std"), 
         "sem_Ft_roi": ("mean_Ft_roi", sem_from_series),
-        "mean_N_contactos_roi": ("N_contactos_roi", "mean")
+        "mean_N_contactos_roi": ("N_contactos_roi", "mean"),
+        "mean_N_particulas_roi": ("N_particulas_roi", "mean") # NUEVO
     }
 
     # Propagar las sumatorias promediadas de las geometrías al resumen final
@@ -708,7 +720,6 @@ def make_configuration_summary(summary_path, out_path):
             if col_mean in df.columns:
                 agg_kwargs[f"mean_Fn_{reg}_{tipo}"] = (col_mean, "mean")
                 
-            # --- NUEVAS LÍNEAS: Propagar la contribución ---
             col_contrib = f"contrib_mean_Fn_{reg}_{tipo}"
             if col_contrib in df.columns:
                 agg_kwargs[f"mean_contrib_Fn_{reg}_{tipo}"] = (col_contrib, "mean")
