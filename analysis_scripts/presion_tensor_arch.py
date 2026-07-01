@@ -169,12 +169,16 @@ def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, 
     for region in ['arco', 'roi', 'bulk']:
         mask_reg = p_df['region'] == region
         sub_df = p_df[mask_reg]
-        A_tot = sub_df['area'].sum()
-        res[f"P_{region}"] = sub_df['P_A'].sum() / A_tot if A_tot > 0 else np.nan
+        
+        # Guardamos numeradores y denominadores totales de la región
+        res[f"SumP_{region}"] = sub_df['P_A'].sum()
+        res[f"Area_{region}"] = sub_df['area'].sum()
+        
         for tipo in ['B', 'S']:
             mask_tipo = sub_df['tipo'] == tipo
-            A_tipo = sub_df.loc[mask_tipo, 'area'].sum()
-            res[f"P_{region}_{tipo}"] = sub_df.loc[mask_tipo, 'P_A'].sum() / A_tipo if A_tipo > 0 else np.nan
+            # Guardamos numeradores y denominadores por componente
+            res[f"SumP_{region}_{tipo}"] = sub_df.loc[mask_tipo, 'P_A'].sum()
+            res[f"Area_{region}_{tipo}"] = sub_df.loc[mask_tipo, 'area'].sum()
 
     del p_df
     return res
@@ -421,13 +425,28 @@ def main():
         grouped = df_all.groupby(group_cols, dropna=False)
         df_config = grouped.size().reset_index(name='n_atascos')
         
-        variables_presion = ['P_bulk', 'P_bulk_B', 'P_bulk_S', 'P_arco', 'P_arco_B', 'P_arco_S', 'P_roi', 'P_roi_B', 'P_roi_S']
-        cols_to_agg = [var for var in variables_presion if var in df_all.columns]
+        # Definimos las columnas de sumas que provienen del paso anterior
+        variables_sumar = [
+            'SumP_bulk', 'Area_bulk', 'SumP_bulk_B', 'Area_bulk_B', 'SumP_bulk_S', 'Area_bulk_S',
+            'SumP_arco', 'Area_arco', 'SumP_arco_B', 'Area_arco_B', 'SumP_arco_S', 'Area_arco_S',
+            'SumP_roi', 'Area_roi', 'SumP_roi_B', 'Area_roi_B', 'SumP_roi_S', 'Area_roi_S'
+        ]
+        cols_to_agg = [var for var in variables_sumar if var in df_all.columns]
         
         if cols_to_agg:
-            df_means = grouped[cols_to_agg].mean().rename(columns=lambda x: f'mean_{x}').reset_index(drop=True)
-            df_stds = grouped[cols_to_agg].std().rename(columns=lambda x: f'std_{x}').reset_index(drop=True)
-            df_config = pd.concat([df_config, df_means, df_stds], axis=1)
+            # Agrupamos sumando los numeradores y denominadores de todo el grupo
+            df_sums = grouped[cols_to_agg].sum().reset_index(drop=True)
+            df_config = pd.concat([df_config, df_sums], axis=1)
+            
+            # Calculamos las presiones macroscópicas dividiendo la fuerza total entre el área total del grupo
+            for reg in ['bulk', 'arco', 'roi']:
+                df_config[f'mean_P_{reg}'] = df_config[f'SumP_{reg}'] / df_config[f'Area_{reg}']
+                for t in ['B', 'S']:
+                    # Si el área acumulada es 0, devolverá NaN de forma correcta y controlada
+                    df_config[f'mean_P_{reg}_{t}'] = df_config[f'SumP_{reg}_{t}'] / df_config[f'Area_{reg}_{t}']
+            
+            # Opcional: Elimina las columnas auxiliares de sumas para mantener limpio tu CSV final
+            df_config = df_config.drop(columns=variables_sumar)
             
             df_config.to_csv(config_csv_path, index=False)
             print(f"Finalizado - Archivo definitivo guardado en: {config_csv_path}")

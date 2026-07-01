@@ -1,0 +1,17 @@
+fig 7
+leyenda titulo forma
+
+cruzadas
+<s> vs tortuosidad
+<s> vs Fm fuerza contacto (medio o mediana) todas las partículas
+<s> vs Fm fuerza contacto (medio o mediana) partículas grandes
+<s> vs Fm fuerza contacto (medio o mediana) partículas chicas
+
+deviator (tangencial)
+fuera de la diagonal dividido la presion
+
+arcos tensiones buscar articulos
+articulos mezcla justificar mas el trabajo 
+sin vibracion es importante regimen atascamiento
+
+
