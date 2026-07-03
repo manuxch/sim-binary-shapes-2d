@@ -192,7 +192,6 @@ def process_one_jam_task(xy_file, contact_file, jam_id, config_id, dt, r_large_m
         df_particles = pd.DataFrame.from_dict(particles, orient='index')
         df_particles.index.name = 'id'
         
-        # Corrección geométrica intermedia para separar componentes numéricamente
         factors = {
             "Disco": 1.0,
             "Triangulo": float(np.cos(np.pi / 3)),
@@ -230,7 +229,6 @@ def process_one_jam_task(xy_file, contact_file, jam_id, config_id, dt, r_large_m
             
         summary = calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, dt, umbral_r)
         
-        # DETERMINACIÓN DE FORMAS BASADA EN EL MASTER INDEX (Verdad de campo unívoca)
         if pd.notna(sides_large_m):
             forma_grande = nombre_forma(sides_large_m)
         else:
@@ -299,15 +297,11 @@ def generar_tareas(xy_files, master_dict, dt):
             jam_id = os.path.basename(xy_file).split('_')[-1].replace('.xy', '')
             config_id = os.path.basename(os.path.dirname(xy_file))
             
-            # Normalizar la ruta del archivo actual para buscarlo en el master_dict de forma unívoca
             abs_xy = os.path.abspath(os.path.normpath(xy_file))
             sim_path = os.path.dirname(os.path.dirname(abs_xy)) # Sube 2 niveles para llegar a la raíz de la simulación
             
-            # Intento de matcheo robusto: 
-            # 1. Por ruta absoluta exacta
             config_info = master_dict.get(sim_path)
             
-            # 2. Si no coincide la raíz (ej. si corrés el script desde otra ruta), matchea por el sufijo único "Categoría/Carpeta"
             if not config_info:
                 parts = sim_path.split(os.sep)
                 if len(parts) >= 2:
@@ -376,11 +370,9 @@ def main():
             'chi': row.get('chi')
         }
         
-        # Guardamos en el diccionario con la ruta absoluta normalizada
         path_abs = os.path.abspath(os.path.normpath(str(path_val)))
         master_dict[path_abs] = info
         
-        # También guardamos usando la combinación "Categoría/Carpeta_Simulación" para evitar colisiones entre familias
         parts = path_abs.split(os.sep)
         if len(parts) >= 2:
             suffix_key = os.path.join(parts[-2], parts[-1])
@@ -425,7 +417,6 @@ def main():
         grouped = df_all.groupby(group_cols, dropna=False)
         df_config = grouped.size().reset_index(name='n_atascos')
         
-        # Definimos las columnas de sumas que provienen del paso anterior
         variables_sumar = [
             'SumP_bulk', 'Area_bulk', 'SumP_bulk_B', 'Area_bulk_B', 'SumP_bulk_S', 'Area_bulk_S',
             'SumP_arco', 'Area_arco', 'SumP_arco_B', 'Area_arco_B', 'SumP_arco_S', 'Area_arco_S',
@@ -434,7 +425,6 @@ def main():
         cols_to_agg = [var for var in variables_sumar if var in df_all.columns]
         
         if cols_to_agg:
-            # Agrupamos sumando los numeradores y denominadores de todo el grupo
             df_sums = grouped[cols_to_agg].sum().reset_index(drop=True)
             df_config = pd.concat([df_config, df_sums], axis=1)
             
@@ -442,10 +432,9 @@ def main():
             for reg in ['bulk', 'arco', 'roi']:
                 df_config[f'mean_P_{reg}'] = df_config[f'SumP_{reg}'] / df_config[f'Area_{reg}']
                 for t in ['B', 'S']:
-                    # Si el área acumulada es 0, devolverá NaN de forma correcta y controlada
+                    # Si el área acumulada es 0, devolverá NaN
                     df_config[f'mean_P_{reg}_{t}'] = df_config[f'SumP_{reg}_{t}'] / df_config[f'Area_{reg}_{t}']
             
-            # Opcional: Elimina las columnas auxiliares de sumas para mantener limpio tu CSV final
             df_config = df_config.drop(columns=variables_sumar)
             
             df_config.to_csv(config_csv_path, index=False)
