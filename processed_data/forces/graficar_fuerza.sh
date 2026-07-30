@@ -1,218 +1,158 @@
 #!/bin/bash
 
-# --- 1. Leer argumentos ---
-MODO=${1:-interactivo}
-GEOMETRIA1=${2:-Pent-Disco}
-RATIO1=${3:-0.1}
-GEOMETRIA2=${4:-none}
-RATIO2=${5:-none}
-GEOMETRIA3=${6:-none}
-RATIO3=${7:-none}
-GEOMETRIA4=${8:-none}
-RATIO4=${9:-none}
+# --- 1. Definir contenedor ---
+CONTENEDOR="/home/juli/work/lab/containers/workstation_full.sif"
 
-# Disco-Disco, Cuad-Disco, Tri-Disco, Pent-Disco
+# --- 2. Ejecutar Python dentro del contenedor ---
+apptainer exec $CONTENEDOR python3 - "$@" << 'EOF'
+import sys
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 
-ARCHIVO_IN="resumen_fuerza_normal_por_configuracion.csv"
+# =============================================================================
+# 1. LECTURA DE ARGUMENTOS (Heredados desde Bash)
+# =============================================================================
+args = sys.argv[1:]
+mode = args[0] if len(args) > 0 else 'interactivo'
+g1 = args[1] if len(args) > 1 else 'none'
+r1 = args[2] if len(args) > 2 else 'none'
+g2 = args[3] if len(args) > 3 else 'none'
+r2 = args[4] if len(args) > 4 else 'none'
+g3 = args[5] if len(args) > 5 else 'none'
+r3 = args[6] if len(args) > 6 else 'none'
+g4 = args[7] if len(args) > 7 else 'none'
+r4 = args[8] if len(args) > 8 else 'none'
 
-# --- Función para determinar el tipo de punto de Gnuplot ---
-obtener_puntos() {
-    local geom=$1
-    if [ "$geom" == "none" ]; then
-        echo "7 6"
-        return
-    fi
-    local forma_grande=$(echo "$geom" | cut -d'-' -f1 | tr '[:upper:]' '[:lower:]')
+configs = []
+for g, r in [(g1, r1), (g2, r2), (g3, r3), (g4, r4)]:
+    if g != 'none' and r != 'none':
+        configs.append((g, float(r)))
 
-    case "$forma_grande" in
-        disco|circ)       echo "7 6"   ;; # Círculos
-        cuad|cuadrado)    echo "5 4"   ;; # Cuadrados
-        tri|triangulo)    echo "9 8"   ;; # Triángulos hacia arriba
-        rombo|diamante)   echo "13 12" ;; # Rombos/Diamantes
-        pent|pentagono)   echo "15 14" ;; # Pentágonos
-        *)                echo "7 6"   ;; # Círculos por defecto
-    esac
+if not configs:
+    print("Error: No se proporcionaron configuraciones válidas.")
+    sys.exit(1)
+
+archivo_in = "resumen_fuerza_normal_por_configuracion.csv"
+if not os.path.exists(archivo_in):
+    print(f"Error: No se encuentra el archivo {archivo_in}")
+    sys.exit(1)
+
+df = pd.read_csv(archivo_in)
+
+# =============================================================================
+# 2. CONFIGURACIÓN DE ESTÉTICA MATPLOTLIB
+# =============================================================================
+plt.rcParams.update({
+    'font.family': 'STIXGeneral',
+    'mathtext.fontset': 'stix',
+    'text.usetex': False,
+    'axes.labelsize': 28,
+    'xtick.labelsize': 22,
+    'ytick.labelsize': 22,
+    'legend.fontsize': 18,
+    'xtick.direction': 'in',
+    'ytick.direction': 'in',
+    'xtick.top': True,
+    'ytick.right': True,
+    'axes.linewidth': 1.2,
+})
+
+geom_names = {
+    'Disco-Disco': 'Disk-Disk',
+    'Cuad-Disco': 'Square-Disk',
+    'Tri-Disco': 'Triangle-Disk',
+    'Pent-Disco': 'Pentagon-Disk'
 }
 
-# Obtener los tipos de puntos para las configuraciones existentes
-read PT_LLENO_1 PT_VACIO_1 <<< $(obtener_puntos "$GEOMETRIA1")
-[ "$GEOMETRIA2" != "none" ] && read PT_LLENO_2 PT_VACIO_2 <<< $(obtener_puntos "$GEOMETRIA2")
-[ "$GEOMETRIA3" != "none" ] && read PT_LLENO_3 PT_VACIO_3 <<< $(obtener_puntos "$GEOMETRIA3")
-[ "$GEOMETRIA4" != "none" ] && read PT_LLENO_4 PT_VACIO_4 <<< $(obtener_puntos "$GEOMETRIA4")
+def get_marker(geom):
+    g = geom.lower()
+    if 'tri' in g: return '^'
+    if 'cuad' in g: return 's'
+    if 'pent' in g: return 'p'
+    return 'o'
 
-# Definir títulos y nombres de archivo dinámicos
-if [ "$GEOMETRIA2" != "none" ]; then
-    echo "Preparando COMPARACIÓN MÚLTIPLE..."
-    ARCHIVO_OUT_PDF="fuerzas_comparacion_multiple.pdf"
-    TITULO_GRAFICO="Comparación de Fuerzas Multigeometría"
-else
-    echo "Preparando datos: $GEOMETRIA1 (Ratio: $RATIO1)..."
-    ARCHIVO_OUT_PDF="fuerzas_${GEOMETRIA1}_ratio_${RATIO1}.pdf"
-    TITULO_GRAFICO="Desglose de Fuerzas - ${GEOMETRIA1} (Area Ratio ${RATIO1})"
-fi
+# =============================================================================
+# 3. GRAFICACIÓN
+# =============================================================================
+fig, ax = plt.subplots(figsize=(10, 7))
 
-# --- 2. Preparar archivo usando Python+Pandas ---
-CONTENEDOR="/home/juli/work/lab/containers/workstation_full.sif"
-CMD_PYTHON="apptainer exec $CONTENEDOR python3"
+# Variable para llevar el registro del valor más alto en el eje Y
+max_y_global = 0
 
-$CMD_PYTHON -c "
-import pandas as pd
-import sys
-
-try:
-    archivo = sys.argv[1]
-    configs = [
-        (sys.argv[2], sys.argv[3], 'temp_1.csv', 2),
-        (sys.argv[4], sys.argv[5], 'temp_2.csv', 3),
-        (sys.argv[6], sys.argv[7], 'temp_3.csv', 4),
-        (sys.argv[8], sys.argv[9], 'temp_4.csv', 5)
-    ]
+for g, r in configs:
+    mask = (df["geometry_label"] == g) & np.isclose(df["area_ratio_nominal"].astype(float), r, atol=0.03)
+    df_sub = df[mask].copy()
     
-    df = pd.read_csv(archivo)
+    if df_sub.empty:
+        print(f"Advertencia: No hay datos para {g} con ratio {r}")
+        continue
+        
+    df_sub = df_sub.groupby("chi").mean(numeric_only=True).reset_index().sort_values("chi")
+    chi = df_sub["chi"]
     
-    for geom, ratio, out_file, exit_code in configs:
-        if geom != 'none' and ratio != 'none':
-            ratio_val = float(ratio)
-            df_sub = df[(df['geometry_label'] == geom) & (df['area_ratio_nominal'] == ratio_val)].copy()
-            if df_sub.empty:
-                sys.exit(exit_code)
-            df_sub.groupby('chi').mean(numeric_only=True).reset_index().sort_values('chi').to_csv(out_file, index=False)
-            
-except Exception as e:
-    print('Error procesando CSV:', e)
-    sys.exit(1)
-" "$ARCHIVO_IN" "$GEOMETRIA1" "$RATIO1" "$GEOMETRIA2" "$RATIO2" "$GEOMETRIA3" "$RATIO3" "$GEOMETRIA4" "$RATIO4"
-
-# Verificar salidas de Python
-PY_STATUS=$?
-if [ $PY_STATUS -ne 0 ]; then
-    echo "Error en extracción de datos. Código de salida Python: $PY_STATUS"
-    rm -f temp_*.csv
-    exit 1
-fi
-
-# --- 3. Construir comando dinámico de Gnuplot ---
-# Config 1
-PLOT_CMD="plot 'temp_1.csv' using \"chi\":\"mean_contrib_Fn_arco_BB\" with linespoints ls 1 title \"${GEOMETRIA1}(${RATIO1}) Arco BB\", \\
-         'temp_1.csv' using \"chi\":\"mean_contrib_Fn_arco_BS\" with linespoints ls 2 title \"${GEOMETRIA1}(${RATIO1}) Arco BS\", \\
-         'temp_1.csv' using \"chi\":\"mean_contrib_Fn_arco_SS\" with linespoints ls 3 title \"${GEOMETRIA1}(${RATIO1}) Arco SS\", \\
-         'temp_1.csv' using \"chi\":(column(\"mean_contrib_Fn_arco_BB\") + column(\"mean_contrib_Fn_arco_BS\") + column(\"mean_contrib_Fn_arco_SS\")) with linespoints ls 4 title \"${GEOMETRIA1} SUMA ARCO\", \\
-         'temp_1.csv' using \"chi\":\"mean_contrib_Fn_roi_BB\" with linespoints ls 5 title \"${GEOMETRIA1}(${RATIO1}) ROI BB\", \\
-         'temp_1.csv' using \"chi\":\"mean_contrib_Fn_roi_BS\" with linespoints ls 6 title \"${GEOMETRIA1}(${RATIO1}) ROI BS\", \\
-         'temp_1.csv' using \"chi\":\"mean_contrib_Fn_roi_SS\" with linespoints ls 7 title \"${GEOMETRIA1}(${RATIO1}) ROI SS\", \\
-         'temp_1.csv' using \"chi\":(column(\"mean_contrib_Fn_roi_BB\") + column(\"mean_contrib_Fn_roi_BS\") + column(\"mean_contrib_Fn_roi_SS\")) with linespoints ls 8 title \"${GEOMETRIA1} SUMA ROI\""
-
-# Config 2
-if [ "$GEOMETRIA2" != "none" ]; then
-    PLOT_CMD="${PLOT_CMD}, \\
-         'temp_2.csv' using \"chi\":\"mean_contrib_Fn_arco_BB\" with linespoints ls 9 title \"${GEOMETRIA2}(${RATIO2}) Arco BB\", \\
-         'temp_2.csv' using \"chi\":\"mean_contrib_Fn_arco_BS\" with linespoints ls 10 title \"${GEOMETRIA2}(${RATIO2}) Arco BS\", \\
-         'temp_2.csv' using \"chi\":\"mean_contrib_Fn_arco_SS\" with linespoints ls 11 title \"${GEOMETRIA2}(${RATIO2}) Arco SS\", \\
-         'temp_2.csv' using \"chi\":(column(\"mean_contrib_Fn_arco_BB\") + column(\"mean_contrib_Fn_arco_BS\") + column(\"mean_contrib_Fn_arco_SS\")) with linespoints ls 12 title \"${GEOMETRIA2} SUMA ARCO\", \\
-         'temp_2.csv' using \"chi\":\"mean_contrib_Fn_roi_BB\" with linespoints ls 13 title \"${GEOMETRIA2}(${RATIO2}) ROI BB\", \\
-         'temp_2.csv' using \"chi\":\"mean_contrib_Fn_roi_BS\" with linespoints ls 14 title \"${GEOMETRIA2}(${RATIO2}) ROI BS\", \\
-         'temp_2.csv' using \"chi\":\"mean_contrib_Fn_roi_SS\" with linespoints ls 15 title \"${GEOMETRIA2}(${RATIO2}) ROI SS\", \\
-         'temp_2.csv' using \"chi\":(column(\"mean_contrib_Fn_roi_BB\") + column(\"mean_contrib_Fn_roi_BS\") + column(\"mean_contrib_Fn_roi_SS\")) with linespoints ls 16 title \"${GEOMETRIA2} SUMA ROI\""
-fi
-
-# Config 3
-if [ "$GEOMETRIA3" != "none" ]; then
-    PLOT_CMD="${PLOT_CMD}, \\
-         'temp_3.csv' using \"chi\":\"mean_contrib_Fn_arco_BB\" with linespoints ls 17 title \"${GEOMETRIA3}(${RATIO3}) Arco BB\", \\
-         'temp_3.csv' using \"chi\":\"mean_contrib_Fn_arco_BS\" with linespoints ls 18 title \"${GEOMETRIA3}(${RATIO3}) Arco BS\", \\
-         'temp_3.csv' using \"chi\":\"mean_contrib_Fn_arco_SS\" with linespoints ls 19 title \"${GEOMETRIA3}(${RATIO3}) Arco SS\", \\
-         'temp_3.csv' using \"chi\":(column(\"mean_contrib_Fn_arco_BB\") + column(\"mean_contrib_Fn_arco_BS\") + column(\"mean_contrib_Fn_arco_SS\")) with linespoints ls 20 title \"${GEOMETRIA3} SUMA ARCO\", \\
-         'temp_3.csv' using \"chi\":\"mean_contrib_Fn_roi_BB\" with linespoints ls 21 title \"${GEOMETRIA3}(${RATIO3}) ROI BB\", \\
-         'temp_3.csv' using \"chi\":\"mean_contrib_Fn_roi_BS\" with linespoints ls 22 title \"${GEOMETRIA3}(${RATIO3}) ROI BS\", \\
-         'temp_3.csv' using \"chi\":\"mean_contrib_Fn_roi_SS\" with linespoints ls 23 title \"${GEOMETRIA3}(${RATIO3}) ROI SS\", \\
-         'temp_3.csv' using \"chi\":(column(\"mean_contrib_Fn_roi_BB\") + column(\"mean_contrib_Fn_roi_BS\") + column(\"mean_contrib_Fn_roi_SS\")) with linespoints ls 24 title \"${GEOMETRIA3} SUMA ROI\""
-fi
-
-# Config 4
-if [ "$GEOMETRIA4" != "none" ]; then
-    PLOT_CMD="${PLOT_CMD}, \\
-         'temp_4.csv' using \"chi\":\"mean_contrib_Fn_arco_BB\" with linespoints ls 25 title \"${GEOMETRIA4}(${RATIO4}) Arco BB\", \\
-         'temp_4.csv' using \"chi\":\"mean_contrib_Fn_arco_BS\" with linespoints ls 26 title \"${GEOMETRIA4}(${RATIO4}) Arco BS\", \\
-         'temp_4.csv' using \"chi\":\"mean_contrib_Fn_arco_SS\" with linespoints ls 27 title \"${GEOMETRIA4}(${RATIO4}) Arco SS\", \\
-         'temp_4.csv' using \"chi\":(column(\"mean_contrib_Fn_arco_BB\") + column(\"mean_contrib_Fn_arco_BS\") + column(\"mean_contrib_Fn_arco_SS\")) with linespoints ls 28 title \"${GEOMETRIA4} SUMA ARCO\", \\
-         'temp_4.csv' using \"chi\":\"mean_contrib_Fn_roi_BB\" with linespoints ls 29 title \"${GEOMETRIA4}(${RATIO4}) ROI BB\", \\
-         'temp_4.csv' using \"chi\":\"mean_contrib_Fn_roi_BS\" with linespoints ls 30 title \"${GEOMETRIA4}(${RATIO4}) ROI BS\", \\
-         'temp_4.csv' using \"chi\":\"mean_contrib_Fn_roi_SS\" with linespoints ls 31 title \"${GEOMETRIA4}(${RATIO4}) ROI SS\", \\
-         'temp_4.csv' using \"chi\":(column(\"mean_contrib_Fn_roi_BB\") + column(\"mean_contrib_Fn_roi_BS\") + column(\"mean_contrib_Fn_roi_SS\")) with linespoints ls 32 title \"${GEOMETRIA4} SUMA ROI\""
-fi
-
-# --- 4. Configurar Terminal Gnuplot ---
-if [ "$MODO" == "pdf" ]; then
-    TERM_CONFIG="set terminal pdfcairo size 14,9 enhanced font 'Arial,12'
-set output '${ARCHIVO_OUT_PDF}'"
-    PAUSE_CMD=""
-else
-    TERM_CONFIG="set terminal qt size 1200,800 enhanced font 'Arial,10'
-set mouse"
-    PAUSE_CMD="pause mouse close"
-fi
-
-# --- 5. Ejecutar Gnuplot ---
-gnuplot <<-EOF
-    $TERM_CONFIG
+    geom_en = geom_names.get(g, g)
+    marker = get_marker(g)
     
-    set datafile separator ','
-    set datafile columnheaders
-    set decimalsign '.'
+    c_bb, c_bs, c_ss = '#0072B2', '#D55E00', '#009E73'
+    c_sum = '#000000'
+    c_sum_roi = '#666666'
     
-    set xlabel "Chi"
-    set ylabel "Aporte a la Fuerza Normal Promedio"
-    set title "$TITULO_GRAFICO"
+    # --- ARCOS (Línea sólida, marcadores llenos) ---
+    arch_bb = df_sub["mean_contrib_Fn_arco_BB"]
+    arch_bs = df_sub["mean_contrib_Fn_arco_BS"]
+    arch_ss = df_sub["mean_contrib_Fn_arco_SS"]
+    arch_sum = arch_bb + arch_bs + arch_ss
     
-    # Ajustamos la leyenda para que no se salga si hay 32 líneas
-    set key outside right top font ",9" spacing 0.9 maxrows 16
+    ax.plot(chi, arch_bb, label=f"{geom_en}({r}) Arch BB", color=c_bb, marker=marker, ls='-', mfc=c_bb, mec=c_bb, lw=2, ms=8)
+    ax.plot(chi, arch_bs, label=f"{geom_en}({r}) Arch BS", color=c_bs, marker=marker, ls='-', mfc=c_bs, mec=c_bs, lw=2, ms=8)
+    ax.plot(chi, arch_ss, label=f"{geom_en}({r}) Arch SS", color=c_ss, marker=marker, ls='-', mfc=c_ss, mec=c_ss, lw=2, ms=8)
+    ax.plot(chi, arch_sum, label=f"{geom_en} Sum Arch", color=c_sum, marker=marker, ls='-', mfc=c_sum, mec=c_sum, lw=2.5, ms=10)
     
-    set xrange[0:0.2]
+    # --- ROI (Línea punteada, marcadores vacíos) ---
+    roi_bb = df_sub["mean_contrib_Fn_roi_BB"]
+    roi_bs = df_sub["mean_contrib_Fn_roi_BS"]
+    roi_ss = df_sub["mean_contrib_Fn_roi_SS"]
+    roi_sum = roi_bb + roi_bs + roi_ss
     
-    # ESTILOS CONFIG 1
-    set style line 1 lc rgb "red" pt $PT_LLENO_1 ps 0.8 lw 1.5
-    set style line 2 lc rgb "forest-green" pt $PT_LLENO_1 ps 0.8 lw 1.5
-    set style line 3 lc rgb "blue" pt $PT_LLENO_1 ps 0.8 lw 1.5
-    set style line 4 lc rgb "black" pt $PT_LLENO_1 ps 1.2 lw 3
-    set style line 5 lc rgb "red" pt $PT_VACIO_1 ps 0.8 lw 1.5 dt 2
-    set style line 6 lc rgb "forest-green" pt $PT_VACIO_1 ps 0.8 lw 1.5 dt 2
-    set style line 7 lc rgb "blue" pt $PT_VACIO_1 ps 0.8 lw 1.5 dt 2
-    set style line 8 lc rgb "gray" pt $PT_VACIO_1 ps 1.2 lw 3 dt 2
+    ax.plot(chi, roi_bb, label=f"{geom_en}({r}) ROI BB", color=c_bb, marker=marker, ls='--', mfc='none', mec=c_bb, lw=2, ms=8)
+    ax.plot(chi, roi_bs, label=f"{geom_en}({r}) ROI BS", color=c_bs, marker=marker, ls='--', mfc='none', mec=c_bs, lw=2, ms=8)
+    ax.plot(chi, roi_ss, label=f"{geom_en}({r}) ROI SS", color=c_ss, marker=marker, ls='--', mfc='none', mec=c_ss, lw=2, ms=8)
+    ax.plot(chi, roi_sum, label=f"{geom_en} Sum ROI", color=c_sum_roi, marker=marker, ls='--', mfc='none', mec=c_sum_roi, lw=2.5, ms=10)
 
-    # ESTILOS CONFIG 2
-    set style line 9 lc rgb "red" pt ${PT_LLENO_2:-7} ps 0.8 lw 1.5
-    set style line 10 lc rgb "forest-green" pt ${PT_LLENO_2:-7} ps 0.8 lw 1.5
-    set style line 11 lc rgb "blue" pt ${PT_LLENO_2:-7} ps 0.8 lw 1.5
-    set style line 12 lc rgb "black" pt ${PT_LLENO_2:-7} ps 1.2 lw 3
-    set style line 13 lc rgb "red" pt ${PT_VACIO_2:-6} ps 0.8 lw 1.5 dt 2
-    set style line 14 lc rgb "forest-green" pt ${PT_VACIO_2:-6} ps 0.8 lw 1.5 dt 2
-    set style line 15 lc rgb "blue" pt ${PT_VACIO_2:-6} ps 0.8 lw 1.5 dt 2
-    set style line 16 lc rgb "gray" pt ${PT_VACIO_2:-6} ps 1.2 lw 3 dt 2
+    # CORRECCIÓN: Revisar el máximo absoluto considerando AMBAS curvas sumadas
+    max_actual = max(arch_sum.max(), roi_sum.max())
+    if max_actual > max_y_global:
+        max_y_global = max_actual
 
-    # ESTILOS CONFIG 3
-    set style line 17 lc rgb "red" pt ${PT_LLENO_3:-7} ps 0.8 lw 1.5
-    set style line 18 lc rgb "forest-green" pt ${PT_LLENO_3:-7} ps 0.8 lw 1.5
-    set style line 19 lc rgb "blue" pt ${PT_LLENO_3:-7} ps 0.8 lw 1.5
-    set style line 20 lc rgb "black" pt ${PT_LLENO_3:-7} ps 1.2 lw 3
-    set style line 21 lc rgb "red" pt ${PT_VACIO_3:-6} ps 0.8 lw 1.5 dt 2
-    set style line 22 lc rgb "forest-green" pt ${PT_VACIO_3:-6} ps 0.8 lw 1.5 dt 2
-    set style line 23 lc rgb "blue" pt ${PT_VACIO_3:-6} ps 0.8 lw 1.5 dt 2
-    set style line 24 lc rgb "gray" pt ${PT_VACIO_3:-6} ps 1.2 lw 3 dt 2
+# Configuraciones de ejes
+ax.set_xlabel(r"Concentration $\chi$")
+ax.set_ylabel("Average Normal Force Contribution")
 
-    # ESTILOS CONFIG 4
-    set style line 25 lc rgb "red" pt ${PT_LLENO_4:-7} ps 0.8 lw 1.5
-    set style line 26 lc rgb "forest-green" pt ${PT_LLENO_4:-7} ps 0.8 lw 1.5
-    set style line 27 lc rgb "blue" pt ${PT_LLENO_4:-7} ps 0.8 lw 1.5
-    set style line 28 lc rgb "black" pt ${PT_LLENO_4:-7} ps 1.2 lw 3
-    set style line 29 lc rgb "red" pt ${PT_VACIO_4:-6} ps 0.8 lw 1.5 dt 2
-    set style line 30 lc rgb "forest-green" pt ${PT_VACIO_4:-6} ps 0.8 lw 1.5 dt 2
-    set style line 31 lc rgb "blue" pt ${PT_VACIO_4:-6} ps 0.8 lw 1.5 dt 2
-    set style line 32 lc rgb "gray" pt ${PT_VACIO_4:-6} ps 1.2 lw 3 dt 2
+# Limpieza de los ticks del eje X para que no se superpongan los ceros
+ax.set_xlim(0, 0.2)
+ax.set_xticks([0.0, 0.05, 0.10, 0.15, 0.20])
 
-    $PLOT_CMD
+# El límite superior se calcula sobre el pico MÁS ALTO de todo el gráfico + 45%
+ax.set_ylim(0, max_y_global * 1.45)
 
-    $PAUSE_CMD
+# Leyenda adentro, arriba a la derecha
+ax.legend(loc='upper right', frameon=True, edgecolor='black', framealpha=1.0)
+
+plt.tight_layout()
+
+# =============================================================================
+# 4. GUARDAR O MOSTRAR
+# =============================================================================
+if len(configs) > 1:
+    out_pdf = "fuerzas_comparacion_multiple.pdf"
+else:
+    out_pdf = f"fuerzas_{configs[0][0]}_ratio_{configs[0][1]}.pdf"
+
+if mode == 'pdf':
+    plt.savefig(out_pdf, bbox_inches='tight')
+else:
+    plt.show()
+
 EOF
-
-# --- 6. Limpieza ---
-rm -f temp_1.csv temp_2.csv temp_3.csv temp_4.csv

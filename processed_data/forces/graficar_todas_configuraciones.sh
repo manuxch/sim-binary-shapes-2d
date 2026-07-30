@@ -10,8 +10,13 @@ echo "==================================================="
 echo " INICIANDO GENERACIÓN MASIVA DE GRÁFICOS"
 echo "==================================================="
 
+CONTENEDOR="/home/juli/work/lab/containers/workstation_full.sif"
+CMD_PYTHON="apptainer exec $CONTENEDOR python3"
+
+
+
 # 2. Usar Python para extraer todas las combinaciones únicas de Geometría y Ratio
-python3 -c "
+$CMD_PYTHON -c "
 import pandas as pd
 df = pd.read_csv('$ARCHIVO_CSV')
 # Filtrar filas que tengan geometría y ratio válidos
