@@ -12,7 +12,7 @@ set grid xtics ytics mxtics mytics
 set size square
 
 # Filtrar para una simulación específica
-target_hash = "edb58a19dfc2"
+target_hash = "85bba77841e4"
 cmd_esqueleto = sprintf("< grep '%s' /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv", target_hash)
 
 # Inicializar la variable que guardará el estado de la fila anterior
