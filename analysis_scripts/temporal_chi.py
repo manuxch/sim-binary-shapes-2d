@@ -111,7 +111,7 @@ def analizar_flujo_temporal(row):
         
         # Ajuste de límites para que el texto no se corte
         plt.ylim(0, min(1.0, max(chi_nominal * 2.5, df_plot['chi_eff'].max() * 1.3)))
-        plt.grid(True, linestyle=':', alpha=0.6)
+        # plt.grid(True, linestyle=':', alpha=0.6)
         plt.legend(loc='upper right', frameon=True, shadow=True)
         plt.tight_layout()
         

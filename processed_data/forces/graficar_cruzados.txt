@@ -1,6 +1,7 @@
 set datafile separator ","
 plot "datos_combinados.csv" using (strcol(1) eq "Disco"     ? $4 : NaN):3 title "Disco" with p ls 1 smooth unique, "datos_combinados.csv" using (strcol(1) eq "Cuadrado" ? $4 : NaN):3 title "Cuadrado" with p ls 2 smooth unique, "datos_combinados.csv" u (strcol(1) eq "Pentagono" ? $4 : NaN):3 title "Pentagono" with p ls 3 smooth unique, "datos_combinados.csv" u (strcol(1) eq "Triangulo" ? $4 : NaN):3 title "Triangle" with p ls 4 smooth unique
 
+tamaño medio de avalancha en funcion de tortuosidad
 
 
 sistema_corto,chi,S_mean,Tortuosidad,mean_Fn_bulk,mean_Fn_bulk_BB,mean_Fn_bulk_SS,mean_Fn_roi,mean_Fn_roi_BB,mean_Fn_roi_SS

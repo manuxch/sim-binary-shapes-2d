@@ -487,10 +487,13 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
         return
 
     # --- Plot 6: Composición ---
-    df_mix['frac_arco'] = df_mix['Particulas_Tipo_1'] / df_mix['Total_Particulas_Arco']
+    # Filtrar el DataFrame para conservar solo los valores de chi entre 0 y 0.4
+    df_filtered = df_mix[(df_mix['chi'] >= 0) & (df_mix['chi'] <= 0.4)].copy()
+    
+    df_filtered['frac_arco'] = df_filtered['Particulas_Tipo_1'] / df_filtered['Total_Particulas_Arco']
     plt.figure()
     for sys_name in matrix_systems:
-        group = df_mix[df_mix['sistema'] == sys_name]
+        group = df_filtered[df_filtered['sistema'] == sys_name]
         if group.empty:
             continue
         grp = group.groupby('chi')['frac_arco'].agg(['mean', 'std', 'count']).reset_index()
@@ -502,7 +505,12 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
             label=CFG.english_labels.get(sys_name, sys_name), capsize=4,
         )
 
-    plt.plot([0, df_mix['chi'].max()], [0, df_mix['chi'].max()], 'k--', alpha=0.5, label='Homogeneous')
+    # Ajustar la línea de referencia homogénea para que vaya de 0 a 0.4
+    plt.plot([0, 0.5], [0, 0.5], 'k--', alpha=0.5, label='Homogeneous')
+    
+    # Opcional: fijar explícitamente los límites del eje x
+    plt.xlim(0, 0.45)
+    
     plt.xlabel(r"Global Concentration $\chi$")
     plt.ylabel(r"Arch Additive Fraction $\chi_{arch}$")
     plt.legend(loc='upper left', fontsize='large')
@@ -630,6 +638,9 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
         0.1,
         system_col='sistema',
     )
+    
+    # Filtrar para conservar solo los valores de chi de 0 a 0.4
+    df_filtered = df_filtered[(df_filtered['chi'] >= 0) & (df_filtered['chi'] <= 0.4)]
 
     metrics = {
         'Relacion_Aspecto': 'Arch Aspect Ratio ($H/L$)',
@@ -656,6 +667,9 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
                 label=CFG.english_labels.get(sys_name, sys_name), capsize=4,
             )
 
+        # Fijar explícitamente los límites del eje x de 0 a 0.4
+        plt.xlim(0, 0.45)
+        
         plt.xlabel(r"Concentration $\chi$")
         plt.ylabel(ylabel)
         plt.legend(loc='best', fontsize='small')
