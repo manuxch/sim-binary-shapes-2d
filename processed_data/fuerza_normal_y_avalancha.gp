@@ -32,10 +32,10 @@ target_hash_chi_06 = "5f019851509c"
 
 
 # 2. Unimos el ESQUELETO y las FUERZAS y filtramos
-cmd_00 = sprintf("< paste -d, /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/forces/resumen_fuerza_normal_por_atasco.csv | awk 'NR==1 || /%s/'", target_hash_chi_00)
-cmd_02 = sprintf("< paste -d, /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/forces/resumen_fuerza_normal_por_atasco.csv | awk 'NR==1 || /%s/'", target_hash_chi_02)
-cmd_04 = sprintf("< paste -d, /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/forces/resumen_fuerza_normal_por_atasco.csv | awk 'NR==1 || /%s/'", target_hash_chi_04)
-cmd_06 = sprintf("< paste -d, /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/forces/resumen_fuerza_normal_por_atasco.csv | awk 'NR==1 || /%s/'", target_hash_chi_06)
+cmd_00 = sprintf("< paste -d, /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/forces_old/resumen_fuerza_normal_por_atasco.csv | awk 'NR==1 || /%s/'", target_hash_chi_00)
+cmd_02 = sprintf("< paste -d, /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/forces_old/resumen_fuerza_normal_por_atasco.csv | awk 'NR==1 || /%s/'", target_hash_chi_02)
+cmd_04 = sprintf("< paste -d, /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/forces_old/resumen_fuerza_normal_por_atasco.csv | awk 'NR==1 || /%s/'", target_hash_chi_04)
+cmd_06 = sprintf("< paste -d, /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/forces_old/resumen_fuerza_normal_por_atasco.csv | awk 'NR==1 || /%s/'", target_hash_chi_06)
 
 # 3. Inicializamos memoria
 old = NaN
