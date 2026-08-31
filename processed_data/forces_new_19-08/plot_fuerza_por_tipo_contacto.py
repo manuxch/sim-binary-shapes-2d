@@ -37,6 +37,10 @@ MG = 9.8  # M=1 kg, g=9.8 m/s^2. Normalizamos al graficar (no bakeado en los CSV
 W_SALIDA_PRINCIPAL = 2.0  # excluye COMPARACION-GOLDBERG (barre w_salida a chi fijo)
 MIN_N_SEGUNDO_POOLING = 1  # min-n ya se aplico en force_arch_v4.py; aca solo repoolea
 
+GEOM_REFERENCIA_FILTRADO = "Disco-Disco"  # geometria cuya cantidad de puntos en chi
+                                           # se usa como objetivo al filtrar las demas
+                                           # (ver filtrar_chi_por_cantidad, seccion 2b)
+
 REGIONES = ["arco", "roi"]
 TIPOS = ["BB", "BS", "SS"]
 
@@ -110,6 +114,33 @@ def build_series(df_sub):
     return pd.DataFrame(rows).sort_values("chi")
 
 # =============================================================================
+# 2b. FILTRADO DE CHI (decluttering): las geometrias con aditivo (Cuad/Tri/
+#     Pent-Disco) tienen muchos mas puntos de chi que Disco-Disco en la
+#     region de chi bajo (barridos mas finos), lo que satura visualmente el
+#     grafico. Se iguala la CANTIDAD de puntos a la de GEOM_REFERENCIA_FILTRADO
+#     (mismo ratio), tomando indices equiespaciados sobre el chi YA ORDENADO
+#     de cada geometria. Al ser equiespaciado por INDICE (no por valor de chi)
+#     sobre una grilla no uniforme, esto adelgaza mas donde hay mas puntos
+#     apretados (chi bajo) y casi no toca las zonas ya dispersas (chi alto) -
+#     conserva siempre el primer y el ultimo chi de la serie.
+# =============================================================================
+def n_puntos_referencia(df_full, ratio, geom_ref=GEOM_REFERENCIA_FILTRADO):
+    """Cantidad de chi unicos de la geometria de referencia (disco) para el
+    mismo ratio nominal, usada como objetivo de cantidad de puntos."""
+    mask = (df_full["geometry_label"] == geom_ref) & np.isclose(df_full["area_ratio_nominal"].astype(float), ratio, atol=0.03)
+    return int(df_full.loc[mask, "chi"].nunique())
+
+def filtrar_chi_por_cantidad(df_series, n_objetivo):
+    """Subsamplea df_series (ya construido por build_series, ordenado por
+    chi) a ~n_objetivo puntos, tomando indices equiespaciados. Si ya tiene
+    <= n_objetivo puntos, se devuelve sin tocar."""
+    n = len(df_series)
+    if not n_objetivo or n <= n_objetivo:
+        return df_series
+    idx = np.unique(np.linspace(0, n - 1, n_objetivo).round().astype(int))
+    return df_series.iloc[idx].reset_index(drop=True)
+
+# =============================================================================
 # 3. ESTETICA (igual que graficar_fuerza.sh viejo)
 # =============================================================================
 plt.rcParams.update({
@@ -158,6 +189,15 @@ for g, r in configs:
         continue
 
     df_sub = build_series(df_sub)
+
+    if g != GEOM_REFERENCIA_FILTRADO:
+        n_obj = n_puntos_referencia(df, r)
+        n_antes = len(df_sub)
+        df_sub = filtrar_chi_por_cantidad(df_sub, n_obj)
+        if len(df_sub) != n_antes:
+            print(f"[i] {g}(ratio={r}): {n_antes} -> {len(df_sub)} puntos "
+                  f"(objetivo tomado de {GEOM_REFERENCIA_FILTRADO}={n_obj})")
+
     chi = df_sub["chi"]
     min_chi, max_chi = min(min_chi, chi.min()), max(max_chi, chi.max())
 
