@@ -262,8 +262,21 @@ def plot_sweeps_by_system(
     # La versión zoom sí los conserva.
     excluded_chis_no_zoom = [0.07, 0.075, 0.085, 0.09, 0.095, 0.105, 0.11, 0.15]
 
+    # =========================================================================
+    # PRIMERA PASADA: arma las curvas de cada sistema (sin dibujar todavia) y
+    # junta, de paso, el rango global de x e y (contemplando barra de error)
+    # entre TODOS los sistemas de esta llamada. Con eso, las 4 figuras que
+    # salen de una misma llamada (la tanda sin zoom, o la tanda con zoom)
+    # quedan con el mismo rango de ejes y son directamente comparables entre
+    # si. Las dos llamadas (zoom=False y zoom=True) siguen siendo rangos
+    # independientes entre si, a proposito: forzar el mismo rango ancho de la
+    # tanda sin zoom sobre la tanda con zoom anularia el propio sentido del
+    # zoom.
+    # =========================================================================
+    datos_por_sistema = {}
+    x_all, y_lo_all, y_hi_all = [], [], []
+
     for system_name, _ in target_systems:
-        system_id = system_name.lower().replace('(', '').replace(')', '').replace('_', '-').replace(' ', '-')
         df_mix = df[(df['sistema'] == system_name) & (df['chi'] > 0.0)].copy()
 
         if df_mix.empty:
@@ -287,9 +300,8 @@ def plot_sweeps_by_system(
         if p0 is None:
             continue
 
-        plt.figure()
-
         targets = [0.1, 0.2, 0.4, 0.5]
+        curvas = []
 
         for target in targets:
             grp_raw = select_by_nominal_ar(df_mix, target, atol=0.06)
@@ -314,22 +326,56 @@ def plot_sweeps_by_system(
             x = [0.0] + grp['chi'].tolist()
             y = [p0] + grp['log_S'].tolist()
             err = [e0] + grp['log_S_err'].tolist()
-
-            plt.errorbar(
-                x, y, yerr=err,
-                fmt='s-',
-                label=rf"AR = {chosen:.3g}",
-                capsize=3
-            )
+            curvas.append((chosen, x, y, err))
 
             print(f"\nSistema: {system_name}\n  label AR {target} -> {AR_COL} real {chosen:.4f}")
+
+            x_all.extend(x)
+            y_arr = np.asarray(y, dtype=float)
+            err_arr = np.nan_to_num(np.asarray(err, dtype=float), nan=0.0)
+            y_lo_all.extend((y_arr - err_arr).tolist())
+            y_hi_all.extend((y_arr + err_arr).tolist())
+
+        if curvas:
+            datos_por_sistema[system_name] = curvas
+
+    if not datos_por_sistema:
+        return
+
+    # Rango de x compartido: en la version zoom se respeta el xlim explicito
+    # que ya pasa el caller (es la razon de ser del zoom); en la version sin
+    # zoom se calcula de los datos, con un margen del 5%.
+    if zoom:
+        x_range = xlim
+    else:
+        x_min, x_max = min(x_all), max(x_all)
+        pad_x = (x_max - x_min) * 0.05 if x_max > x_min else 0.02
+        x_range = (x_min - pad_x, x_max + pad_x)
+
+    # Rango de y compartido, con margen del 8% incluyendo las barras de error.
+    y_min, y_max = min(y_lo_all), max(y_hi_all)
+    pad_y = (y_max - y_min) * 0.08 if y_max > y_min else 0.1
+    y_range = (y_min - pad_y, y_max + pad_y)
+
+    # =========================================================================
+    # SEGUNDA PASADA: una figura por sistema, todas con el mismo x_range/y_range.
+    # =========================================================================
+    for system_name, _ in target_systems:
+        if system_name not in datos_por_sistema:
+            continue
+        system_id = system_name.lower().replace('(', '').replace(')', '').replace('_', '-').replace(' ', '-')
+
+        plt.figure()
+        for chosen, x, y, err in datos_por_sistema[system_name]:
+            plt.errorbar(x, y, yerr=err, fmt='s-', label=rf"AR = {chosen:.3g}", capsize=3)
 
         plt.xlabel(r"Concentration $\chi$")
         plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
         plt.legend(loc='upper left')
+        plt.xlim(*x_range)
+        plt.ylim(*y_range)
 
         if zoom:
-            plt.xlim(*xlim)
             save_plot(f"4-{system_id}-clogging-curves-zoom-chi-0p05-0p15")
         else:
             save_plot(f"4-{system_id}-clogging-curves")

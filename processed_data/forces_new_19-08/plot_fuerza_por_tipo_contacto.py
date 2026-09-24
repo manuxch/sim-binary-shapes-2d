@@ -41,6 +41,14 @@ GEOM_REFERENCIA_FILTRADO = "Disco-Disco"  # geometria cuya cantidad de puntos en
                                            # se usa como objetivo al filtrar las demas
                                            # (ver filtrar_chi_por_cantidad, seccion 2b)
 
+CHI_MAX_EJE = 0.4  # eje x fijo en [0, CHI_MAX_EJE] en TODOS los graficos, para que
+                    # sean comparables entre geometrias (Cuad/Pent-Disco tienen datos
+                    # hasta chi=0.6, Tri-Disco hasta 0.3-0.4, Disco-Disco solo hasta
+                    # 0.2). Los puntos con chi > CHI_MAX_EJE se descartan antes de
+                    # graficar (no solo se recorta la vista), para que tampoco influyan
+                    # en el escalado del eje y. Poner en None para volver al
+                    # comportamiento anterior (rango automatico por grafico).
+
 REGIONES = ["arco", "roi"]
 TIPOS = ["BB", "BS", "SS"]
 
@@ -124,11 +132,25 @@ def build_series(df_sub):
 #     apretados (chi bajo) y casi no toca las zonas ya dispersas (chi alto) -
 #     conserva siempre el primer y el ultimo chi de la serie.
 # =============================================================================
-def n_puntos_referencia(df_full, ratio, geom_ref=GEOM_REFERENCIA_FILTRADO):
+def n_puntos_referencia(df_full, ratio, geom_ref=GEOM_REFERENCIA_FILTRADO, chi_max=CHI_MAX_EJE):
     """Cantidad de chi unicos de la geometria de referencia (disco) para el
-    mismo ratio nominal, usada como objetivo de cantidad de puntos."""
+    mismo ratio nominal, usada como objetivo de cantidad de puntos. Respeta
+    CHI_MAX_EJE para que el objetivo sea consistente con el rango que
+    realmente se va a graficar (relevante si mas adelante hay una geometria
+    de referencia que tambien tenga datos mas alla de CHI_MAX_EJE)."""
     mask = (df_full["geometry_label"] == geom_ref) & np.isclose(df_full["area_ratio_nominal"].astype(float), ratio, atol=0.03)
+    if chi_max is not None:
+        mask &= df_full["chi"] <= chi_max
     return int(df_full.loc[mask, "chi"].nunique())
+
+def recortar_chi_max(df_series, chi_max=CHI_MAX_EJE):
+    """Descarta filas con chi > chi_max. Se aplica ANTES del filtro de
+    cantidad de puntos (filtrar_chi_por_cantidad) y antes de calcular
+    max_y_global, para que los puntos fuera de rango ni se cuenten ni
+    influyan en el escalado del eje y."""
+    if chi_max is None:
+        return df_series
+    return df_series[df_series["chi"] <= chi_max].reset_index(drop=True)
 
 def filtrar_chi_por_cantidad(df_series, n_objetivo):
     """Subsamplea df_series (ya construido por build_series, ordenado por
@@ -189,6 +211,7 @@ for g, r in configs:
         continue
 
     df_sub = build_series(df_sub)
+    df_sub = recortar_chi_max(df_sub)
 
     if g != GEOM_REFERENCIA_FILTRADO:
         n_obj = n_puntos_referencia(df, r)
@@ -217,9 +240,9 @@ for g, r in configs:
     arch_ss, arch_ss_err = to_mg(df_sub["mean_Fn_arco_SS"]), to_mg(df_sub["sem_Fn_arco_SS"])
     arch_total, arch_total_err = to_mg(df_sub["mean_Fn_arco"]), to_mg(df_sub["sem_Fn_arco"])
 
-    #ax.errorbar(chi, arch_bb, yerr=arch_bb_err, label=f"{geom_en}({r}) Arch {TIPO_DISPLAY['BB']}", color=c_bb, marker=marker, ls='-', mfc=c_bb, mec=c_bb, lw=2, ms=8, capsize=4)
-    #ax.errorbar(chi, arch_bs, yerr=arch_bs_err, label=f"{geom_en}({r}) Arch {TIPO_DISPLAY['BS']}", color=c_bs, marker=marker, ls='-', mfc=c_bs, mec=c_bs, lw=2, ms=8, capsize=4)
-    #ax.errorbar(chi, arch_ss, yerr=arch_ss_err, label=f"{geom_en}({r}) Arch {TIPO_DISPLAY['SS']}", color=c_ss, marker=marker, ls='-', mfc=c_ss, mec=c_ss, lw=2, ms=8, capsize=4)
+    ax.errorbar(chi, arch_bb, yerr=arch_bb_err, label=f"{geom_en}({r}) Arch {TIPO_DISPLAY['BB']}", color=c_bb, marker=marker, ls='-', mfc=c_bb, mec=c_bb, lw=2, ms=8, capsize=4)
+    ax.errorbar(chi, arch_bs, yerr=arch_bs_err, label=f"{geom_en}({r}) Arch {TIPO_DISPLAY['BS']}", color=c_bs, marker=marker, ls='-', mfc=c_bs, mec=c_bs, lw=2, ms=8, capsize=4)
+    ax.errorbar(chi, arch_ss, yerr=arch_ss_err, label=f"{geom_en}({r}) Arch {TIPO_DISPLAY['SS']}", color=c_ss, marker=marker, ls='-', mfc=c_ss, mec=c_ss, lw=2, ms=8, capsize=4)
     ax.errorbar(chi, arch_total, yerr=arch_total_err, label=f"{geom_en} Total Arch", color=c_sum, marker=marker, ls='-', mfc=c_sum, mec=c_sum, lw=2.5, ms=10, capsize=4)
 
     # --- ROI (linea punteada, marcadores vacios) ---
@@ -228,9 +251,9 @@ for g, r in configs:
     roi_ss, roi_ss_err = to_mg(df_sub["mean_Fn_roi_SS"]), to_mg(df_sub["sem_Fn_roi_SS"])
     roi_total, roi_total_err = to_mg(df_sub["mean_Fn_roi"]), to_mg(df_sub["sem_Fn_roi"])
 
-    #ax.errorbar(chi, roi_bb, yerr=roi_bb_err, label=f"{geom_en}({r}) ROI {TIPO_DISPLAY['BB']}", color=c_bb, marker=marker, ls='--', mfc='none', mec=c_bb, lw=2, ms=8, capsize=4)
-    #ax.errorbar(chi, roi_bs, yerr=roi_bs_err, label=f"{geom_en}({r}) ROI {TIPO_DISPLAY['BS']}", color=c_bs, marker=marker, ls='--', mfc='none', mec=c_bs, lw=2, ms=8, capsize=4)
-    #ax.errorbar(chi, roi_ss, yerr=roi_ss_err, label=f"{geom_en}({r}) ROI {TIPO_DISPLAY['SS']}", color=c_ss, marker=marker, ls='--', mfc='none', mec=c_ss, lw=2, ms=8, capsize=4)
+    ax.errorbar(chi, roi_bb, yerr=roi_bb_err, label=f"{geom_en}({r}) ROI {TIPO_DISPLAY['BB']}", color=c_bb, marker=marker, ls='--', mfc='none', mec=c_bb, lw=2, ms=8, capsize=4)
+    ax.errorbar(chi, roi_bs, yerr=roi_bs_err, label=f"{geom_en}({r}) ROI {TIPO_DISPLAY['BS']}", color=c_bs, marker=marker, ls='--', mfc='none', mec=c_bs, lw=2, ms=8, capsize=4)
+    ax.errorbar(chi, roi_ss, yerr=roi_ss_err, label=f"{geom_en}({r}) ROI {TIPO_DISPLAY['SS']}", color=c_ss, marker=marker, ls='--', mfc='none', mec=c_ss, lw=2, ms=8, capsize=4)
     ax.errorbar(chi, roi_total, yerr=roi_total_err, label=f"{geom_en} Total ROI", color=c_sum_roi, marker=marker, ls='--', mfc='none', mec=c_sum_roi, lw=2.5, ms=10, capsize=4)
 
     # Margen superior: considera y + yerr, no solo y, para que la barra de
@@ -244,7 +267,9 @@ for g, r in configs:
 ax.set_xlabel(r"Concentration $\chi$")
 ax.set_ylabel(r"Average Normal Force / $Mg$")
 
-if np.isfinite(min_chi) and np.isfinite(max_chi):
+if CHI_MAX_EJE is not None:
+    ax.set_xlim(-0.01, CHI_MAX_EJE + 0.01)
+elif np.isfinite(min_chi) and np.isfinite(max_chi):
     span = max_chi - min_chi
     pad = span * 0.05 if span > 0 else 0.02
     ax.set_xlim(min_chi - pad, max_chi + pad)

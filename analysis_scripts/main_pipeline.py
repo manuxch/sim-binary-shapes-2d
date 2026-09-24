@@ -6,7 +6,6 @@ import pandas as pd
 import indexer
 import processor
 import flow_analysis
-import tail_distribution_chi
 import density_map
 import temporal_chi
 import generar_csv_arcos
@@ -53,7 +52,6 @@ def main():
     #     histogram_arch.plot_arch_histograms()
 
     # 7. OTROS ANÁLISIS OPCIONALES
-    # tail_distribution_chi.main(idx_path=idx_path)
     # temporal_chi.main()
 
     print("\n[+] PIPELINE COMPLETADO EXITOSAMENTE.")

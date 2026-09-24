@@ -16,3 +16,6 @@ datos_simulaciones/
 0_backup/
 processed_data_old*/
 *.mp4
+*presion_por_particula.csv
+videos/
+analysis_scripts/por_forma

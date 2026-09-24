@@ -352,8 +352,26 @@ def summarize_fn_one_jam(df_forces, arco_path, particles):
     max_r = max(radios_simulacion) if radios_simulacion else 0.0
     min_r = min(radios_simulacion) if radios_simulacion else 0.0
     
-    # El umbral dinámico se sitúa exactamente a la mitad entre la partícula más grande y la más chica.
-    umbral_r = (max_r + min_r) / 2.0
+    # CORREGIDO: si la diferencia entre el radio mas grande y el mas chico es
+    # menor a UMBRAL_MIN_DIFERENCIA_RELATIVA (relativa a min_r), se trata como
+    # ruido numerico -- no como dos especies reales. Sin esto, en un atasco
+    # genuinamente mono-especie (chi=0 o chi=1), max_r y min_r difieren solo
+    # por precision de punto flotante (los poligonos recalculan r_eff cada
+    # frame a partir de vertices con ruido fisico de la simulacion; los
+    # discos leen r_eff directo de una columna, siempre el mismo valor exacto
+    # -- por eso este bug solo se ve en poligonos). El punto medio entre
+    # max_r y min_r termina partiendo esa diferencia de ruido de 6+ cifras
+    # decimales por la mitad, clasificando la poblacion casi entera como "S"
+    # o "B" segun de que lado del ruido caiga cada particula.
+    UMBRAL_MIN_DIFERENCIA_RELATIVA = 0.01  # 1%: muy por debajo de cualquier
+                                             # r_ratio_nominal real del dataset
+                                             # (~0.3-1.0), muy por encima del
+                                             # ruido numerico tipico (~1e-6).
+    if min_r > 0 and (max_r - min_r) / min_r < UMBRAL_MIN_DIFERENCIA_RELATIVA:
+        umbral_r = min_r - 1.0  # poblacion monodispersa: todo cae del lado B
+    else:
+        # El umbral dinámico se sitúa exactamente a la mitad entre la partícula más grande y la más chica.
+        umbral_r = (max_r + min_r) / 2.0
     
     # Asignar radios y calcular el tipo geométrico del contacto (BB, BS, SS)
     df_forces["r_a"] = df_forces["id_a"].map(lambda x: particles[x].get("r_eff", 0.0) if x in particles else 0.0)
