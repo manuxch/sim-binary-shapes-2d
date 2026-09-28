@@ -112,6 +112,23 @@ Razon de areas (--ratios):
       combinado de un bucket 'ratio0p1' tomaria tambien los frames
       'ratio0p1_chi...' de otra corrida.
 
+Escala de color del mapa promediado:
+    - Los frames se generan con vmin/vmax de percentiles de la presion POR
+      PARTICULA (hace falta para decodificar color -> valor). El mapa final
+      (promedio sobre atascos) tiene un rango mucho mas angosto, asi que por
+      defecto (--escala_mapa mapa) se grafica con percentiles de los propios
+      valores promediados (--mapa_pct 1 99), compartidos por todos los
+      buckets de la corrida.
+    - Para comparar formas distintas (corridas separadas) con la MISMA
+      escala: --vmin_mapa / --vmax_mapa (el script imprime los valores que
+      uso, para copiarlos a la otra corrida).
+    - --solo_combinar rearma los mapas desde los frames existentes, sin
+      regenerarlos (ej. para cambiar la escala).
+
+Otras magnitudes (--col_p):
+    Cualquier columna numerica del archivo, ej. tau / tau_reducida si el
+    archivo tiene el esfuerzo de corte por particula.
+
 Memoria:
     - --chunksize: filas por trozo de lectura (csv y parquet). Bajarlo
       (ej. 50000) reduce el pico de RAM al leer.
@@ -571,6 +588,15 @@ def _armar_tarea(df_jam, cfg, stats):
 _DATASETS = {}
 
 
+def _clave_jam(serie):
+    """Normaliza jam_id para poder juntar archivos distintos: '00133',
+    '133', 133 y 133.0 -> '133'. Los que no son numericos quedan como texto."""
+    s = serie.astype(str).str.strip()
+    num = pd.to_numeric(s, errors='coerce')
+    es_num = num.notna() & (num == num.round())
+    return s.where(~es_num, num.fillna(0).astype('int64').astype(str))
+
+
 def _leer_sim(path, sim_path, chunksize=200_000):
     """Todas las filas de UNA simulacion de un archivo (parquet: filtro de
     pyarrow al leer; csv: recorrido por trozos)."""
@@ -598,6 +624,7 @@ def _generar_tareas_por_sim(path, col_filtro, forma, fuente_chicos, sim_paths, c
     path_ch, col_ch, valor_ch = fuente_chicos
     stats.setdefault('salteados', 0)
     stats.setdefault('sin_chicos', [])
+    stats.setdefault('chicos_huerfanos', [])
     for sp in sorted(sim_paths):
         grandes = _leer_sim(path, sp)
         if grandes.empty:
@@ -613,20 +640,30 @@ def _generar_tareas_por_sim(path, col_filtro, forma, fuente_chicos, sim_paths, c
         if chicos.empty and grandes['chi'].iloc[0] > TOL_CHI:
             stats['sin_chicos'].append(sp)
 
-        grandes = grandes.assign(jam_id=grandes['jam_id'].astype(str))
+        # Se agrupa por una clave normalizada de jam_id (los dos archivos
+        # pueden tener tipos distintos: '00133' en uno, 133 en otro), pero el
+        # nombre del frame usa el jam_id original de los grandes.
+        grandes = grandes.assign(jam_id=grandes['jam_id'].astype(str),
+                                 _jam_key=_clave_jam(grandes['jam_id']))
+        jams_con_grandes = set(grandes['_jam_key'].unique())
         if not chicos.empty:
-            chicos = chicos.assign(jam_id=chicos['jam_id'].astype(str))
-            df = pd.concat([grandes, chicos], ignore_index=True)
+            chicos = chicos.assign(_jam_key=_clave_jam(chicos['jam_id']))
+            huerfanos = ~chicos['_jam_key'].isin(jams_con_grandes)
+            if huerfanos.all():
+                stats['chicos_huerfanos'].append(
+                    (sp, str(grandes['jam_id'].iloc[0]), str(chicos['jam_id'].iloc[0])))
+            df = pd.concat([grandes, chicos.drop(columns='jam_id')], ignore_index=True)
         else:
             df = grandes
         if cfg['ratios_pedidos'] is not None:
             df = _agregar_ratio(df, col_ratio, ratio_sin_etiqueta)
 
-        jams_con_grandes = set(grandes['jam_id'].unique())
         del grandes, chicos
-        for jam, df_jam in df.groupby('jam_id', sort=False):
+        for jam, df_jam in df.groupby('_jam_key', sort=False):
             if jam not in jams_con_grandes:
                 continue
+            # los chicos toman el jam_id (original) de los grandes del mismo atasco
+            df_jam = df_jam.assign(jam_id=df_jam['jam_id'].dropna().iloc[0]).drop(columns='_jam_key')
             tarea = _armar_tarea(df_jam, cfg, stats)
             if tarea is not None:
                 yield tarea
@@ -707,12 +744,31 @@ def _sumar_particion(args):
     return suma_P, suma_alpha
 
 
-def combinar_bucket(out_dir, forma_nombre, bucket, vmin, vmax, out_final_base, min_ocupacion, workers=1):
+ETIQUETAS_COL = {
+    'P': ('Presión media $\\langle P \\rangle$', 'presión promedio'),
+    'P_reducida': ('Presión reducida media $\\langle P/g \\rangle$', 'presión promedio'),
+    'tau': ('Esfuerzo de corte medio $\\langle \\tau \\rangle$', 'esfuerzo de corte promedio'),
+    'tau_reducida': ('Esfuerzo de corte reducido medio $\\langle \\tau/g \\rangle$',
+                     'esfuerzo de corte promedio'),
+}
+
+
+def etiquetas_col(col):
+    """(etiqueta de la barra de color, nombre para el titulo) de la columna graficada."""
+    return ETIQUETAS_COL.get(col, (f'$\\langle$ {col} $\\rangle$', f'{col} promedio'))
+
+
+def calcular_bucket(out_dir, forma_nombre, bucket, vmin, vmax, out_final_base, min_ocupacion,
+                    workers=1):
+    """Decodifica y promedia los frames de un bucket. Devuelve
+    (mapa_medio, ocupacion, n_imagenes) o None si no hay frames, y guarda
+    el .npz. vmin/vmax son los de los FRAMES (hacen falta para decodificar
+    color -> valor), no los de la escala del mapa final."""
     patron = os.path.join(out_dir, f"heatmap_{forma_nombre}_{bucket}_*.png")
     archivos = sorted(glob.glob(patron))
     if not archivos:
         print(f"  (bucket {bucket}: sin frames, se salta)")
-        return
+        return None
 
     n_imagenes = len(archivos)
 
@@ -720,7 +776,7 @@ def combinar_bucket(out_dir, forma_nombre, bucket, vmin, vmax, out_final_base, m
         n_particiones = min(workers, n_imagenes)
         particiones = [archivos[i::n_particiones] for i in range(n_particiones)]
         particiones = [p for p in particiones if p]
-        print(f"  decodificando {n_imagenes} imagenes en {len(particiones)} procesos...")
+        print(f"  {bucket}: decodificando {n_imagenes} imagenes en {len(particiones)} procesos...")
         with mp.Pool(processes=len(particiones)) as pool:
             resultados = pool.map(_sumar_particion, [(p, vmin, vmax) for p in particiones])
         suma_P_ponderada = sum(r[0] for r in resultados)
@@ -728,41 +784,56 @@ def combinar_bucket(out_dir, forma_nombre, bucket, vmin, vmax, out_final_base, m
     else:
         suma_P_ponderada, suma_alpha = _sumar_particion((archivos, vmin, vmax))
 
-    # La ocupacion se sigue calculando porque la usa --min_ocupacion y se
-    # guarda en el .npz, pero ya no se grafica.
     ocupacion = suma_alpha / n_imagenes
     with np.errstate(invalid='ignore', divide='ignore'):
         P_media = np.where(suma_alpha > 0, suma_P_ponderada / suma_alpha, np.nan)
     P_media = np.where(ocupacion >= min_ocupacion, P_media, np.nan)
 
+    base, _ = os.path.splitext(out_final_base)
+    sufijo = "" if bucket == "todos" else f"_{bucket}"
+    np.savez_compressed(f"{base}{sufijo}.npz", P_media=P_media.astype(np.float32),
+                        ocupacion=ocupacion.astype(np.float32),
+                        n_imagenes=n_imagenes, vmin=vmin, vmax=vmax)
+    return P_media, ocupacion, n_imagenes
+
+
+def escala_de_mapas(mapas, pct_min, pct_max):
+    """vmin/vmax de la escala de color de los mapas PROMEDIADOS, a partir de
+    percentiles de sus propios valores (todos los buckets juntos, para que
+    sean comparables entre si). El promedio sobre atascos comprime mucho el
+    rango respecto de los valores por particula, por eso la escala de los
+    frames deja sin usar la parte baja (azul) de la paleta."""
+    valores = np.concatenate([m[np.isfinite(m) & (m > 0)].ravel() for m in mapas])
+    if valores.size == 0:
+        raise SystemExit("Los mapas promediados no tienen valores > 0.")
+    return float(np.percentile(valores, pct_min)), float(np.percentile(valores, pct_max))
+
+
+def graficar_bucket(P_media, n_imagenes, forma_nombre, bucket, out_final_base, vmin_mapa,
+                    vmax_mapa, col_p):
     base, ext = os.path.splitext(out_final_base)
     sufijo = "" if bucket == "todos" else f"_{bucket}"
     out_final = f"{base}{sufijo}{ext}"
 
-    # Una sola figura (solo presion), con el tamaño adaptado a la
-    # proporcion de la imagen -- asi una region recortada (mas ancha que
-    # alta) no queda con mucho espacio en blanco.
+    # Tamaño adaptado a la proporcion de la imagen (una region recortada,
+    # mas ancha que alta, no queda con mucho espacio en blanco).
     alto_px, ancho_px = P_media.shape
     ancho_fig = 8.0
     alto_fig = ancho_fig * alto_px / ancho_px + 1.0
 
-    norm = mcolors.LogNorm(vmin=vmin, vmax=vmax)
+    etiqueta, nombre = etiquetas_col(col_p)
+    norm = mcolors.LogNorm(vmin=vmin_mapa, vmax=vmax_mapa)
     fig, ax_p = plt.subplots(figsize=(ancho_fig, alto_fig))
     im1 = ax_p.imshow(P_media, origin='upper', cmap='viridis', norm=norm)
-    fig.colorbar(im1, ax=ax_p, label='Presión reducida media $\\langle P/g \\rangle$ (escala log)',
+    fig.colorbar(im1, ax=ax_p, label=f'{etiqueta} (escala log)',
                  fraction=0.05, pad=0.02, extend='both')
     titulo_bucket = "" if bucket == "todos" else f", {bucket_a_titulo(bucket)}"
-    ax_p.set_title(f'{forma_nombre}{titulo_bucket} — presión promedio ({n_imagenes} atascos)')
+    ax_p.set_title(f'{forma_nombre}{titulo_bucket} — {nombre} ({n_imagenes} atascos)')
     ax_p.axis('off')
     fig.tight_layout()
     fig.savefig(out_final, dpi=200)
     plt.close(fig)
     print(f"  Guardado: {out_final}  ({n_imagenes} atascos)")
-
-    npz_path = f"{base}{sufijo}.npz"
-    np.savez_compressed(npz_path, P_media=P_media.astype(np.float32),
-                         ocupacion=ocupacion.astype(np.float32),
-                         n_imagenes=n_imagenes, vmin=vmin, vmax=vmax)
 
 
 def _superponer_particion(args):
@@ -910,7 +981,27 @@ def main():
     parser.add_argument('--out_final', required=True,
                          help='archivo base del/los mapa(s) de calor combinado(s) -- si hay varios '
                               'chi, se les agrega el sufijo _chi<valor> antes de la extension')
-    parser.add_argument('--col_p', default='P_reducida', choices=['P', 'P_reducida'])
+    parser.add_argument('--col_p', default='P_reducida',
+                         help="Columna a graficar (default: P_reducida). Cualquier columna "
+                              "numerica del archivo, ej. P, P_reducida, tau, tau_reducida.")
+    parser.add_argument('--escala_mapa', choices=['mapa', 'frames'], default='mapa',
+                         help="Escala de color del mapa promediado: 'mapa' (default) = "
+                              "percentiles de los valores promediados, compartida entre todos "
+                              "los buckets de la corrida; 'frames' = la misma de los frames "
+                              "individuales (comportamiento anterior).")
+    parser.add_argument('--mapa_pct', type=float, nargs=2, default=[1, 99],
+                         metavar=('PCT_MIN', 'PCT_MAX'),
+                         help='Percentiles para --escala_mapa mapa (default: 1 99).')
+    parser.add_argument('--vmin_mapa', type=float, default=None,
+                         help='Fuerza el minimo de la escala del mapa promediado (para usar la '
+                              'MISMA escala en corridas de formas distintas).')
+    parser.add_argument('--vmax_mapa', type=float, default=None,
+                         help='Fuerza el maximo de la escala del mapa promediado.')
+    parser.add_argument('--solo_combinar', action='store_true',
+                         help='No genera frames: rearma los mapas promediados a partir de los '
+                              'frames que ya estan en --out_dir (ej. para cambiar la escala de '
+                              'color). Usar los MISMOS argumentos de escala/region/filtros que '
+                              'la corrida que genero los frames.')
     parser.add_argument('--vmin_pct', type=float, default=2)
     parser.add_argument('--vmax_pct', type=float, default=98)
     parser.add_argument('--vmin', type=float, default=None, help='fuerza un vmin en vez de calcularlo')
@@ -953,6 +1044,11 @@ def main():
     if args.fraccion_altura is not None and not (0 < args.fraccion_altura <= 1):
         raise SystemExit("--fraccion_altura tiene que estar en (0, 1].")
 
+    columnas_csv = _columnas_archivo(args.csv)
+    if args.col_p not in columnas_csv:
+        raise SystemExit(f"--col_p {args.col_p!r} no esta en {args.csv}. Columnas disponibles: "
+                         f"{columnas_csv}")
+
     os.makedirs(args.out_dir, exist_ok=True)
     ya_hay = glob.glob(os.path.join(args.out_dir, f"heatmap_{args.forma}_*.png"))
     if ya_hay and not args.reanudar:
@@ -977,7 +1073,10 @@ def main():
     # las particulas son granos grandes, y lo que falta son los chicos.
     es_forma_chicos = args.forma == args.forma_chicos
     fuente_chicos = None
-    if not es_forma_chicos:
+    if col_filtro == 'forma_grande' and args.csv_chicos is not None:
+        print("(--csv_chicos se ignora: el archivo tiene 'forma_grande', asi que ya trae los "
+              "granos grandes y los chicos de cada mezcla.)")
+    elif not es_forma_chicos:
         if args.csv_chicos is not None:
             col_ch = _detectar_col_filtro(args.csv_chicos)
             valor_ch = args.forma if col_ch == 'forma_grande' else args.forma_chicos
@@ -1085,69 +1184,102 @@ def main():
     # franja del silo (con el silo completo el recorte no saca nada).
     recortar = args.fraccion_altura is not None or args.ylim is not None
 
-    print("Generando frames (una sola pasada por el archivo, separando por chi al vuelo)...")
-    stats = {'salteados': 0}
-    if fuente_chicos is not None:
-        cfg = dict(chis_pedidos=chis_pedidos, ratios_pedidos=ratios_pedidos, out_dir=args.out_dir,
-                   forma_nombre=args.forma, reanudar=args.reanudar, recortar=recortar,
-                   vmin=vmin, vmax=vmax, xlim=xlim, ylim=ylim, col_p=args.col_p)
-        tareas = _generar_tareas_por_sim(args.csv, col_filtro, args.forma, fuente_chicos,
-                                         sim_paths, cfg, stats,
-                                         excluir_sim_path=args.excluir_sim_path,
-                                         invalidos=invalidos, col_ratio=col_ratio,
-                                         ratio_sin_etiqueta=args.ratio_sin_etiqueta)
+    if args.solo_combinar:
+        print("--solo_combinar: se usan los frames que ya estan en --out_dir.")
     else:
-        tareas = _generar_tareas_streaming(
-            args.csv, args.chunksize, col_filtro, args.forma,
-            chis_pedidos, vmin, vmax, xlim, ylim, args.col_p,
-            args.out_dir, args.forma, excluir_sim_path=args.excluir_sim_path,
-            recortar=recortar, reanudar=args.reanudar, stats=stats,
-            ratios_pedidos=ratios_pedidos, col_ratio=col_ratio,
-            ratio_sin_etiqueta=args.ratio_sin_etiqueta,
-            invalidos=invalidos, sim_paths=sim_paths)
+        print("Generando frames (una sola pasada por el archivo, separando por chi al vuelo)...")
+        stats = {'salteados': 0}
+        if fuente_chicos is not None:
+            cfg = dict(chis_pedidos=chis_pedidos, ratios_pedidos=ratios_pedidos, out_dir=args.out_dir,
+                       forma_nombre=args.forma, reanudar=args.reanudar, recortar=recortar,
+                       vmin=vmin, vmax=vmax, xlim=xlim, ylim=ylim, col_p=args.col_p)
+            tareas = _generar_tareas_por_sim(args.csv, col_filtro, args.forma, fuente_chicos,
+                                             sim_paths, cfg, stats,
+                                             excluir_sim_path=args.excluir_sim_path,
+                                             invalidos=invalidos, col_ratio=col_ratio,
+                                             ratio_sin_etiqueta=args.ratio_sin_etiqueta)
+        else:
+            tareas = _generar_tareas_streaming(
+                args.csv, args.chunksize, col_filtro, args.forma,
+                chis_pedidos, vmin, vmax, xlim, ylim, args.col_p,
+                args.out_dir, args.forma, excluir_sim_path=args.excluir_sim_path,
+                recortar=recortar, reanudar=args.reanudar, stats=stats,
+                ratios_pedidos=ratios_pedidos, col_ratio=col_ratio,
+                ratio_sin_etiqueta=args.ratio_sin_etiqueta,
+                invalidos=invalidos, sim_paths=sim_paths)
 
-    # apply_async + un tope de tareas "en vuelo": nunca hay mas de
-    # max_en_vuelo atascos leidos-pero-no-escritos a la vez.
-    # maxtasksperchild: recicla cada worker periodicamente para que no
-    # acumule memoria a lo largo de miles de figuras.
-    max_en_vuelo = args.max_en_vuelo if args.max_en_vuelo is not None else max(args.workers * 2, 2)
-    # 'forkserver': los workers NO heredan la memoria del proceso principal
-    # (con 'fork', cada worker nuevo arranca como copia del principal, con
-    # todo lo que tenga cargado en ese momento).
-    ctx = mp.get_context('forkserver')
-    with ctx.Pool(processes=args.workers, maxtasksperchild=args.max_tareas_worker) as pool:
-        en_vuelo = []
-        n_frames = 0
-        for tarea in tareas:
-            if len(en_vuelo) >= max_en_vuelo:
-                en_vuelo.pop(0).get()
+        # apply_async + un tope de tareas "en vuelo": nunca hay mas de
+        # max_en_vuelo atascos leidos-pero-no-escritos a la vez.
+        # maxtasksperchild: recicla cada worker periodicamente para que no
+        # acumule memoria a lo largo de miles de figuras.
+        max_en_vuelo = args.max_en_vuelo if args.max_en_vuelo is not None else max(args.workers * 2, 2)
+        # 'forkserver': los workers NO heredan la memoria del proceso principal
+        # (con 'fork', cada worker nuevo arranca como copia del principal, con
+        # todo lo que tenga cargado en ese momento).
+        ctx = mp.get_context('forkserver')
+        with ctx.Pool(processes=args.workers, maxtasksperchild=args.max_tareas_worker) as pool:
+            en_vuelo = []
+            n_frames = 0
+            for tarea in tareas:
+                if len(en_vuelo) >= max_en_vuelo:
+                    en_vuelo.pop(0).get()
+                    n_frames += 1
+                    if n_frames % 100 == 0:
+                        print(f"  {n_frames} frames generados...")
+                en_vuelo.append(pool.apply_async(_generar_un_frame, (tarea,)))
+            for r in en_vuelo:
+                r.get()
                 n_frames += 1
-                if n_frames % 100 == 0:
-                    print(f"  {n_frames} frames generados...")
-            en_vuelo.append(pool.apply_async(_generar_un_frame, (tarea,)))
-        for r in en_vuelo:
-            r.get()
-            n_frames += 1
-    msg_salteados = f" ({stats.get('salteados', 0)} salteados por ya existir)" if args.reanudar else ""
-    print(f"Total: {n_frames} frames generados{msg_salteados}.")
-    if stats.get('sin_chicos'):
-        print(f"AVISO: {len(stats['sin_chicos'])} simulaciones con chi > 0 no tienen particulas "
-              f"chicas en {args.csv_chicos} (sus mapas quedan solo con granos grandes):")
-        for sp in stats['sin_chicos'][:20]:
-            print(f"    {sp}")
+        msg_salteados = f" ({stats.get('salteados', 0)} salteados por ya existir)" if args.reanudar else ""
+        print(f"Total: {n_frames} frames generados{msg_salteados}.")
+        if stats.get('sin_chicos'):
+            print(f"AVISO: {len(stats['sin_chicos'])} simulaciones con chi > 0 no tienen particulas "
+                  f"chicas en {args.csv_chicos} (sus mapas quedan solo con granos grandes):")
+            for sp in stats['sin_chicos'][:20]:
+                print(f"    {sp}")
+        if stats.get('chicos_huerfanos'):
+            print(f"AVISO: {len(stats['chicos_huerfanos'])} simulaciones tienen particulas chicas en "
+                  f"{args.csv_chicos}, pero NINGUNA coincide en jam_id con los atascos de los grandes "
+                  f"(sus mapas quedan solo con granos grandes). Ejemplos (sim_path, jam_id grandes, "
+                  f"jam_id chicos):")
+            for item in stats['chicos_huerfanos'][:20]:
+                print(f"    {item}")
 
     lista_r = [ratio_a_etiqueta(r) for r in ratios_pedidos] if ratios_pedidos is not None else [None]
     lista_c = [chi_a_etiqueta(c) for c in chis_pedidos] if chis_pedidos is not None else [None]
     buckets = ["_".join(p for p in par if p) or "todos"
                for par in itertools.product(lista_r, lista_c)]
     print(f"Combinando {len(buckets)} bucket(s)...")
+    resultados_buckets = {}
     for bucket in buckets:
-        combinar_bucket(args.out_dir, args.forma, bucket, vmin, vmax, args.out_final,
-                         args.min_ocupacion, workers=args.workers)
+        res = calcular_bucket(args.out_dir, args.forma, bucket, vmin, vmax, args.out_final,
+                              args.min_ocupacion, workers=args.workers)
+        if res is not None:
+            resultados_buckets[bucket] = res
         if args.tambien_superponer:
             superponer_bucket(args.out_dir, args.forma, bucket, args.out_final, workers=args.workers)
         if args.tambien_color:
             promediar_color_bucket(args.out_dir, args.forma, bucket, args.out_final, workers=args.workers)
+
+    if not resultados_buckets:
+        print("No hay mapas para graficar.")
+        return
+
+    # Escala de color de los mapas promediados, compartida entre buckets.
+    if args.escala_mapa == 'frames':
+        vmin_mapa, vmax_mapa = vmin, vmax
+    else:
+        vmin_mapa, vmax_mapa = escala_de_mapas([r[0] for r in resultados_buckets.values()],
+                                               args.mapa_pct[0], args.mapa_pct[1])
+    if args.vmin_mapa is not None:
+        vmin_mapa = args.vmin_mapa
+    if args.vmax_mapa is not None:
+        vmax_mapa = args.vmax_mapa
+    print(f"Escala de los mapas promediados: vmin={vmin_mapa:.4g}  vmax={vmax_mapa:.4g}  "
+          f"(para usar la misma en otra forma: --vmin_mapa {vmin_mapa:.4g} --vmax_mapa {vmax_mapa:.4g})")
+    for bucket, (P_media, _, n_imagenes) in resultados_buckets.items():
+        graficar_bucket(P_media, n_imagenes, args.forma, bucket, args.out_final,
+                        vmin_mapa, vmax_mapa, args.col_p)
 
 
 if __name__ == '__main__':

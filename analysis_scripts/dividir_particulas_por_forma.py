@@ -49,9 +49,17 @@ def main():
     filas_por_forma = {}
     filas_totales = 0
 
+    esquemas = {}  # forma -> schema del primer trozo (los siguientes se castean a este)
     for chunk in pd.read_csv(args.csv, dtype={'jam_id': str}, chunksize=args.chunksize, na_filter=False):
         filas_totales += len(chunk)
         col_filtro = 'forma_grande' if 'forma_grande' in chunk.columns else 'shape'
+        if filas_totales == len(chunk):
+            if col_filtro == 'shape':
+                print("AVISO: el csv no tiene columna 'forma_grande' -> se divide por la forma de "
+                      "CADA particula: los discos chicos de mezclas con poligonos van a quedar en "
+                      "el archivo de Disco. Regenerar el csv con presion_tensor_arch.py actualizado.")
+            else:
+                print("Dividiendo por 'forma_grande' (forma del grano grande de la mezcla).")
 
         for forma, sub in chunk.groupby(col_filtro):
             filas_por_forma[forma] = filas_por_forma.get(forma, 0) + len(sub)
@@ -60,7 +68,13 @@ def main():
                 tabla = pa.Table.from_pandas(sub, preserve_index=False)
                 if forma not in escritores:
                     path = os.path.join(args.out_dir, f"presion_por_particula_{forma}.parquet")
+                    esquemas[forma] = tabla.schema
                     escritores[forma] = pq.ParquetWriter(path, tabla.schema)
+                elif not tabla.schema.equals(esquemas[forma]):
+                    # pandas puede inferir tipos distintos en trozos distintos
+                    # (ej. una columna numerica con celdas vacias -> texto);
+                    # ParquetWriter exige el mismo schema en todo el archivo.
+                    tabla = tabla.cast(esquemas[forma])
                 escritores[forma].write_table(tabla)
             else:
                 path = os.path.join(args.out_dir, f"presion_por_particula_{forma}.csv")

@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 import gc
+import time
+import collections
 import multiprocessing as mp
 
 CHI_REGEX = re.compile(r'(?:Chi_|_X)([0-9]+(?:p[0-9]+)?)')
@@ -110,24 +112,30 @@ def detectar_arco_primario(df_particles, df_contacts, r_salida):
     # Igual que el script de referencia: agrupamos por par de particulas,
     # sumando f_norm de los (hasta 2) puntos de contacto de un mismo par,
     # para tener UNA arista por par tocandose (no una por punto de contacto).
-    valid_c = df_contacts[(df_contacts['id_a'] >= 0) & (df_contacts['id_b'] >= 0)].copy()
+    valid_c = df_contacts[(df_contacts['id_a'] >= 0) & (df_contacts['id_b'] >= 0)]
     if valid_c.empty:
         return []
-    valid_c['pair_a'] = np.minimum(valid_c['id_a'], valid_c['id_b'])
-    valid_c['pair_b'] = np.maximum(valid_c['id_a'], valid_c['id_b'])
-    grouped = valid_c.groupby(['pair_a', 'pair_b'], as_index=False).agg({'f_norm': 'sum'})
+    # Un par por particulas en contacto (no uno por punto de contacto),
+    # ordenado por (pair_a, pair_b) como el groupby original, asi el orden
+    # en que se agregan las aristas (y el desempate de Dijkstra) no cambia.
+    pares = pd.DataFrame({
+        'pair_a': np.minimum(valid_c['id_a'].to_numpy(), valid_c['id_b'].to_numpy()),
+        'pair_b': np.maximum(valid_c['id_a'].to_numpy(), valid_c['id_b'].to_numpy()),
+    }).drop_duplicates().sort_values(['pair_a', 'pair_b'])
 
     idx = df_particles.index
+    pos_y = df_particles['pos_y']
+    ya = pos_y.reindex(pares['pair_a'].to_numpy()).to_numpy(dtype=np.float64)
+    yb = pos_y.reindex(pares['pair_b'].to_numpy()).to_numpy(dtype=np.float64)
+    ok = ~np.isnan(ya) & ~np.isnan(yb)
+    # 10**y en float de python (float64): con y ~ 100 en float32 desborda.
+    costos = [10.0 ** float(y) for y in np.maximum(ya[ok], yb[ok])]
+
     G = nx.Graph()
     G.add_nodes_from(idx)
-    for u, v in zip(grouped['pair_a'].to_numpy(), grouped['pair_b'].to_numpy()):
-        u, v = int(u), int(v)
-        if u in df_particles.index and v in df_particles.index:
-            # float() explicito: pos_y viene en float32, y 10**y_max con
-            # y_max~90 desborda en float32 (silencioso, da inf) pero no en
-            # float64/python float.
-            y_max = float(max(df_particles.at[u, 'pos_y'], df_particles.at[v, 'pos_y']))
-            G.add_edge(u, v, costo_arco=10.0 ** y_max)
+    G.add_weighted_edges_from(zip(pares['pair_a'].to_numpy()[ok].tolist(),
+                                  pares['pair_b'].to_numpy()[ok].tolist(), costos),
+                              weight='costo_arco')
 
     r_col = 'r_eff'  # radio geometrico real, no el nominal ajustado por forma
 
@@ -161,32 +169,28 @@ def detectar_arco_primario(df_particles, df_contacts, r_salida):
             return []
         return path[iL:iR + 1]
 
-    nleft, nright = [], []
-    for pid in df_particles.index:
-        x = df_particles.at[pid, 'pos_x']
-        y = df_particles.at[pid, 'pos_y']
-        r = df_particles.at[pid, r_col]
-        if (y - r) < 0.2:
-            if x < 0.0:
-                nleft.append(pid)
-            elif x > 0.0:
-                nright.append(pid)
+    apoyado = ((df_particles['pos_y'] - df_particles[r_col]) < 0.2).to_numpy()
+    xs = df_particles['pos_x'].to_numpy()
+    nleft = idx[apoyado & (xs < 0.0)].tolist()
+    nright = idx[apoyado & (xs > 0.0)].tolist()
 
-    mejor_arco = []
+    # Antes: un Dijkstra (+ un has_path) por CADA par (izquierdo, derecho).
+    # Ahora: un solo Dijkstra por grano izquierdo, que da el costo y el
+    # camino a todos los derechos de una vez. El camino a cada destino es
+    # el mismo que devuelve nx.shortest_path(l, rr) (misma exploracion) y
+    # el costo es la misma suma en el mismo orden, asi que el arco elegido
+    # es identico, incluso en empates (misma iteracion y comparacion <).
+    mejor_path = None
     min_costo_total = float('inf')
     for l in nleft:
+        dist, paths = nx.single_source_dijkstra(G, l, weight='costo_arco')
         for rr in nright:
-            if nx.has_path(G, l, rr):
-                try:
-                    path = nx.shortest_path(G, source=l, target=rr, weight='costo_arco')
-                    costo_path = sum(G[path[i]][path[i + 1]]['costo_arco'] for i in range(len(path) - 1))
-                    if costo_path < min_costo_total:
-                        min_costo_total = costo_path
-                        mejor_arco = purgar_cimientos(path)
-                except nx.NetworkXNoPath:
-                    continue
+            costo_path = dist.get(rr)
+            if costo_path is not None and costo_path < min_costo_total:
+                min_costo_total = costo_path
+                mejor_path = paths[rr]
 
-    return mejor_arco
+    return purgar_cimientos(mejor_path) if mejor_path is not None else []
 
 def obtener_vector_normal_poly(row):
     px, py = row['px'], row['py']
@@ -246,6 +250,49 @@ def obtener_vector_normal_poly_lado(row, lado):
     return mejor_normal
 
 
+def normales_poligonos(px, py, cx, cy, coords):
+    """Version vectorizada de obtener_vector_normal_poly_lado para muchos
+    contactos a la vez: para cada contacto busca el lado del poligono mas
+    cercano al punto de contacto y devuelve su normal unitaria hacia afuera.
+    Misma logica que la version fila por fila (proyeccion acotada al
+    segmento, primer minimo, orientacion segun el centro), pero con numpy
+    sobre todos los contactos de poligonos con igual cantidad de vertices."""
+    m = len(px)
+    out = np.zeros((m, 2))
+    if m == 0:
+        return out
+    px = np.asarray(px, dtype=np.float64)
+    py = np.asarray(py, dtype=np.float64)
+    cx = np.asarray(cx, dtype=np.float64)
+    cy = np.asarray(cy, dtype=np.float64)
+    coords = list(coords)
+    nverts = np.array([len(c) for c in coords])
+    for n in np.unique(nverts):
+        sel = np.flatnonzero(nverts == n)
+        V = np.stack([np.asarray(coords[i], dtype=np.float64) for i in sel])  # (k, n, 2)
+        d = np.roll(V, -1, axis=1) - V                                        # lados
+        l2 = (d ** 2).sum(-1)
+        P = np.stack([px[sel], py[sel]], -1)[:, None, :]
+        with np.errstate(invalid='ignore', divide='ignore'):
+            t = np.clip(((P - V) * d).sum(-1) / l2, 0.0, 1.0)
+        proy = V + t[..., None] * d
+        dist2 = ((P - proy) ** 2).sum(-1)
+        dist2 = np.where(l2 == 0, np.inf, dist2)
+        i = np.argmin(dist2, axis=1)          # primer minimo, igual que el '<' original
+        filas = np.arange(len(sel))
+        ds = d[filas, i]
+        ps = proy[filas, i]
+        nv = np.stack([-ds[:, 1], ds[:, 0]], -1)
+        norma = np.hypot(nv[:, 0], nv[:, 1])
+        nv = np.where(norma[:, None] > 0, nv / np.where(norma > 0, norma, 1.0)[:, None], nv)
+        C = np.stack([cx[sel], cy[sel]], -1)
+        flip = ((nv * (ps - C)).sum(-1)) < 0
+        nv[flip] *= -1
+        nv[np.isinf(dist2).all(axis=1)] = 0.0   # poligono degenerado -> (0, 0) como antes
+        out[sel] = nv
+    return out
+
+
 def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, dt, umbral_r, g=9.8):
     part_cols = df_particles[['pos_x', 'pos_y', 'shape', 'coords']]
     # how='left' en vez del inner-join por defecto: un contacto contra la
@@ -281,17 +328,17 @@ def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, 
         df.loc[mask_disk_B, 'nx_v'] = np.where(valid, nx / norma, 0.0).astype(np.float32)
         df.loc[mask_disk_B, 'ny_v'] = np.where(valid, ny / norma, 0.0).astype(np.float32)
 
-    mask_poly_A = usar_A & (df['shape_A'] != 'Disco')
-    if mask_poly_A.any():
-        normals = df[mask_poly_A].apply(lambda r: obtener_vector_normal_poly_lado(r, 'A'), axis=1)
-        df.loc[mask_poly_A, 'nx_v'] = normals.apply(lambda x: x[0]).astype(np.float32)
-        df.loc[mask_poly_A, 'ny_v'] = normals.apply(lambda x: x[1]).astype(np.float32)
-
-    mask_poly_B = usar_B & (df['shape_B'] != 'Disco')
-    if mask_poly_B.any():
-        normals = df[mask_poly_B].apply(lambda r: obtener_vector_normal_poly_lado(r, 'B'), axis=1)
-        df.loc[mask_poly_B, 'nx_v'] = normals.apply(lambda x: x[0]).astype(np.float32)
-        df.loc[mask_poly_B, 'ny_v'] = normals.apply(lambda x: x[1]).astype(np.float32)
+    # Poligonos: antes con df.apply fila por fila (un loop de Python por
+    # contacto, lo mas lento de todo el script); ahora vectorizado.
+    for lado, usar in (('A', usar_A), ('B', usar_B)):
+        mask_poly = usar & df[f'shape_{lado}'].notna() & (df[f'shape_{lado}'] != 'Disco')
+        if mask_poly.any():
+            sub = df.loc[mask_poly]
+            nrm = normales_poligonos(sub['px'].to_numpy(), sub['py'].to_numpy(),
+                                     sub[f'pos_x_{lado}'].to_numpy(), sub[f'pos_y_{lado}'].to_numpy(),
+                                     sub[f'coords_{lado}'].to_numpy())
+            df.loc[mask_poly, 'nx_v'] = nrm[:, 0].astype(np.float32)
+            df.loc[mask_poly, 'ny_v'] = nrm[:, 1].astype(np.float32)
 
     df['tx_v'] = -df['ny_v']
     df['ty_v'] = df['nx_v']
@@ -314,19 +361,45 @@ def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, 
     df['S11_A'] = np.where(a_valida, (df['Fy_A'] * (df['py'] - df['pos_y_A'])).astype(np.float32), 0.0)
     df['S00_B'] = np.where(b_valida, (signo_B * df['Fx_A'] * (df['px'] - df['pos_x_B'])).astype(np.float32), 0.0)
     df['S11_B'] = np.where(b_valida, (signo_B * df['Fy_A'] * (df['py'] - df['pos_y_B'])).astype(np.float32), 0.0)
+    # Componentes cruzadas, misma convencion S_ij = r_i * F_j que S00/S11
+    # (r = punto de contacto - centro de la particula):
+    #   S01 = r_x F_y,  S10 = r_y F_x
+    df['S01_A'] = np.where(a_valida, (df['Fy_A'] * (df['px'] - df['pos_x_A'])).astype(np.float32), 0.0)
+    df['S10_A'] = np.where(a_valida, (df['Fx_A'] * (df['py'] - df['pos_y_A'])).astype(np.float32), 0.0)
+    df['S01_B'] = np.where(b_valida, (signo_B * df['Fy_A'] * (df['px'] - df['pos_x_B'])).astype(np.float32), 0.0)
+    df['S10_B'] = np.where(b_valida, (signo_B * df['Fx_A'] * (df['py'] - df['pos_y_B'])).astype(np.float32), 0.0)
 
-    tensor_A = df.groupby('id_a')[['S00_A', 'S11_A']].sum().rename(columns={'S00_A':'S00', 'S11_A':'S11'})
-    tensor_B = df.groupby('id_b')[['S00_B', 'S11_B']].sum().rename(columns={'S00_B':'S00', 'S11_B':'S11'})
+    comps_A = {'S00_A': 'S00', 'S11_A': 'S11', 'S01_A': 'S01', 'S10_A': 'S10'}
+    comps_B = {'S00_B': 'S00', 'S11_B': 'S11', 'S01_B': 'S01', 'S10_B': 'S10'}
+    tensor_A = df.groupby('id_a')[list(comps_A)].sum().rename(columns=comps_A)
+    tensor_B = df.groupby('id_b')[list(comps_B)].sum().rename(columns=comps_B)
     tensor_total = tensor_A.add(tensor_B, fill_value=0)
     
     del df, tensor_A, tensor_B
     
-    p_df = df_particles.join(tensor_total).fillna({'S00': 0, 'S11': 0})
+    p_df = df_particles.join(tensor_total).fillna({'S00': 0, 'S11': 0, 'S01': 0, 'S10': 0})
     p_df['P'] = np.where(p_df['area'] > 0, -0.5 * (p_df['S00'] + p_df['S11']) / p_df['area'], 0.0)
     # Presion en unidades reducidas (P/g), para comparar directamente entre
     # configuraciones sin que la escala dependa de la aceleracion de la
     # gravedad usada en cada corrida.
     p_df['P_reducida'] = p_df['P'] / g
+
+    # Tensor de esfuerzos por particula, con la MISMA convencion de signo que
+    # P (compresion positiva): sigma_ij = -S_ij / area, asi P = (sxx+syy)/2.
+    # La parte cruzada se simetriza: el tensor de una particula armado con
+    # r x F no es exactamente simetrico si los torques no estan balanceados.
+    area_ok = p_df['area'] > 0
+    area_seg = p_df['area'].where(area_ok, 1.0)
+    sxx = np.where(area_ok, -p_df['S00'] / area_seg, 0.0)
+    syy = np.where(area_ok, -p_df['S11'] / area_seg, 0.0)
+    sxy = np.where(area_ok, -0.5 * (p_df['S01'] + p_df['S10']) / area_seg, 0.0)
+    # Esfuerzo de corte maximo (radio del circulo de Mohr, parte
+    # deviatorica en 2D). No depende de la convencion de signo.
+    p_df['tau'] = np.sqrt((0.5 * (sxx - syy)) ** 2 + sxy ** 2)
+    p_df['tau_reducida'] = p_df['tau'] / g
+    p_df['sigma_xx_reducida'] = sxx / g
+    p_df['sigma_yy_reducida'] = syy / g
+    p_df['sigma_xy_reducida'] = sxy / g
     
     y_arco = p_df.loc[p_df.index.isin(arco_path), 'pos_y'] if arco_path else []
     roi_ymin = y_arco.min() if len(y_arco) > 0 else 0
@@ -339,6 +412,10 @@ def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, 
     p_df['tipo'] = np.where(p_df[r_col] >= umbral_r, 'B', 'S')
     p_df['P_A'] = p_df['P'] * p_df['area']
     p_df['P_A_reducida'] = p_df['P_reducida'] * p_df['area']
+    # Mismo esquema para el esfuerzo de corte: suma de tau*area, para poder
+    # promediar pesando por area igual que P (media de |tau| por particula).
+    p_df['T_A'] = p_df['tau'] * p_df['area']
+    p_df['T_A_reducida'] = p_df['tau_reducida'] * p_df['area']
 
     res = {}
     for region in ['arco', 'roi', 'bulk']:
@@ -348,6 +425,8 @@ def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, 
         # Guardamos numeradores y denominadores totales de la región
         res[f"SumP_{region}"] = sub_df['P_A'].sum()
         res[f"SumP_reducida_{region}"] = sub_df['P_A_reducida'].sum()
+        res[f"SumTau_{region}"] = sub_df['T_A'].sum()
+        res[f"SumTau_reducida_{region}"] = sub_df['T_A_reducida'].sum()
         res[f"Area_{region}"] = sub_df['area'].sum()
         
         for tipo in ['B', 'S']:
@@ -355,11 +434,15 @@ def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, 
             # Guardamos numeradores y denominadores por componente
             res[f"SumP_{region}_{tipo}"] = sub_df.loc[mask_tipo, 'P_A'].sum()
             res[f"SumP_reducida_{region}_{tipo}"] = sub_df.loc[mask_tipo, 'P_A_reducida'].sum()
+            res[f"SumTau_{region}_{tipo}"] = sub_df.loc[mask_tipo, 'T_A'].sum()
+            res[f"SumTau_reducida_{region}_{tipo}"] = sub_df.loc[mask_tipo, 'T_A_reducida'].sum()
             res[f"Area_{region}_{tipo}"] = sub_df.loc[mask_tipo, 'area'].sum()
 
     # Detalle por particula (para poder guardar la presion individual de
     # cada grano, ademas del resumen agregado por region de arriba).
-    particulas = p_df[['pos_x', 'pos_y', 'shape', 'tipo', 'region', 'area', 'P', 'P_reducida', 'coords']].reset_index()
+    particulas = p_df[['pos_x', 'pos_y', 'shape', 'tipo', 'region', 'area', 'P', 'P_reducida',
+                       'tau', 'tau_reducida', 'sigma_xx_reducida', 'sigma_yy_reducida',
+                       'sigma_xy_reducida', 'coords']].reset_index()
     # 'coords' es None para discos, o un array (N,2) de vertices absolutos
     # para poligonos -> lo serializamos a JSON para que sobreviva el CSV.
     # Sin esto, graficar_presion_atasco.py no tiene forma de distinguir un
@@ -453,33 +536,17 @@ def process_one_jam_task(xy_file, contact_file, jam_id, config_id, dt, r_large_m
         particulas['config_id'] = config_id
         particulas['sim_path'] = sim_path
         particulas['chi'] = chi_val
+        # Forma de la MEZCLA (grano grande / grano chico), igual en todas las
+        # particulas del atasco: dividir_particulas_por_forma.py separa por
+        # 'forma_grande', asi los discos chicos de una mezcla con triangulos
+        # quedan en el archivo de Triangulo y no en el de Disco.
+        particulas['forma_grande'] = forma_grande
+        particulas['forma_chica'] = forma_chica
         
         del df_particles, df_contacts
         return {"ok": True, "summary": summary, "particulas": particulas}
     except Exception as e:
         return {"ok": False, "error": str(e)}
-
-def write_buffer_to_csv(buffer, atasco_csv_path):
-    if not buffer: return
-    df_lote = pd.DataFrame(buffer)
-    meta_cols = ['forma_grande', 'forma_chica', 'chi', 'r_chica', 'config_id', 'sim_path', 'jam_id']
-    other_cols = [c for c in df_lote.columns if c not in meta_cols]
-    meta_cols = [c for c in meta_cols if c in df_lote.columns]
-    df_lote = df_lote[meta_cols + other_cols]
-    escribir_header = not os.path.exists(atasco_csv_path)
-    df_lote.to_csv(atasco_csv_path, mode='a', index=False, header=escribir_header)
-    del df_lote
-
-def write_particulas_buffer(buffer, particulas_csv_path):
-    if not buffer: return
-    df_lote = pd.concat(buffer, ignore_index=True)
-    meta_cols = ['config_id', 'sim_path', 'jam_id', 'chi', 'id']
-    other_cols = [c for c in df_lote.columns if c not in meta_cols]
-    meta_cols = [c for c in meta_cols if c in df_lote.columns]
-    df_lote = df_lote[meta_cols + other_cols]
-    escribir_header = not os.path.exists(particulas_csv_path)
-    df_lote.to_csv(particulas_csv_path, mode='a', index=False, header=escribir_header)
-    del df_lote
 
 def parse_grain_column(val):
     if pd.isna(val):
@@ -496,179 +563,367 @@ def parse_grain_column(val):
         except:
             return {}
 
-def generar_tareas(xy_files, master_dict, dt):
-    for xy_file in xy_files:
-        contact_file = xy_file.replace(".xy", ".dat").replace("atasco_", "atasco_contacts_")
-        if os.path.exists(contact_file):
-            jam_id = os.path.basename(xy_file).split('_')[-1].replace('.xy', '')
-            config_id = os.path.basename(os.path.dirname(xy_file))
-            
-            abs_xy = os.path.abspath(os.path.normpath(xy_file))
-            sim_path = os.path.dirname(os.path.dirname(abs_xy)) # Sube 2 niveles para llegar a la raíz de la simulación
-            
-            config_info = master_dict.get(sim_path)
-            
-            if not config_info:
-                parts = sim_path.split(os.sep)
-                if len(parts) >= 2:
-                    suffix_key = os.path.join(parts[-2], parts[-1])
-                    config_info = master_dict.get(suffix_key, {})
-                else:
-                    config_info = {}
-            
-            r_large = config_info.get('r_large', np.nan)
-            r_small = config_info.get('r_small', np.nan)
-            sides_large = config_info.get('sides_large', np.nan)
-            sides_small = config_info.get('sides_small', np.nan)
-            chi_val = config_info.get('chi', np.nan)
-            
-            yield (xy_file, contact_file, jam_id, config_id, dt, r_large, r_small, sides_large, sides_small, chi_val, sim_path)
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", required=True)
-    parser.add_argument("--out", required=True)
-    parser.add_argument("--master", required=True)
-    parser.add_argument("--workers", type=int, default=os.cpu_count() or 4)
-    parser.add_argument("--dt", type=float, default=0.001)
-    args = parser.parse_args()
-
-    os.makedirs(args.out, exist_ok=True)
-    atasco_csv_path = os.path.join(args.out, "resumen_presion_por_atasco.csv")
-    config_csv_path = os.path.join(args.out, "resumen_presion_por_configuracion.csv")
-    particulas_csv_path = os.path.join(args.out, "presion_por_particula.csv")
-
-    if os.path.exists(atasco_csv_path):
-        os.remove(atasco_csv_path)
-    if os.path.exists(particulas_csv_path):
-        os.remove(particulas_csv_path)
-
-    print("Cargando master index y parseando JSON de granos...")
-    df_master = pd.read_csv(args.master)
+def cargar_master(path_master):
+    df_master = pd.read_csv(path_master)
     df_master = df_master.drop_duplicates(subset=['path'])
-    
     master_dict = {}
     for _, row in df_master.iterrows():
         path_val = row.get('path')
         if pd.isna(path_val):
             continue
-            
         grain_data = parse_grain_column(row.get('grain_json'))
-        large_radius = np.nan
-        large_sides = np.nan
-        small_radius = np.nan
-        small_sides = np.nan
-
+        large_radius = large_sides = small_radius = small_sides = np.nan
         if isinstance(grain_data, list) and len(grain_data) > 0:
             large_radius = grain_data[0].get('radius', np.nan)
             large_sides = grain_data[0].get('sides', np.nan)
             if len(grain_data) > 1:
                 small_radius = grain_data[1].get('radius', np.nan)
                 small_sides = grain_data[1].get('sides', np.nan)
-        
         if pd.isna(large_radius) and pd.notna(row.get('r_large')):
             large_radius = row.get('r_large')
         if pd.isna(small_radius) and pd.notna(row.get('r_small')):
             small_radius = row.get('r_small')
-
-        info = {
-            'r_large': large_radius,
-            'r_small': small_radius,
-            'sides_large': large_sides,
-            'sides_small': small_sides,
-            'chi': row.get('chi')
-        }
-        
+        info = {'r_large': large_radius, 'r_small': small_radius,
+                'sides_large': large_sides, 'sides_small': small_sides, 'chi': row.get('chi')}
         path_abs = os.path.abspath(os.path.normpath(str(path_val)))
         master_dict[path_abs] = info
-        
         parts = path_abs.split(os.sep)
         if len(parts) >= 2:
-            suffix_key = os.path.join(parts[-2], parts[-1])
-            master_dict[suffix_key] = info
-            
-    del df_master
+            master_dict[os.path.join(parts[-2], parts[-1])] = info
+    return master_dict
 
-    print("Buscando archivos atasco_*.xy...")
-    xy_files = sorted(glob.glob(os.path.join(args.dir, "**", "atasco_*.xy"), recursive=True))
-    total_estimado = len(xy_files)
-    print(f"Archivos encontrados (aprox a procesar): {total_estimado}")
 
-    FLUSH_SIZE = 250 
-    FLUSH_SIZE_PART = 200_000  # filas de particulas, no cantidad de atascos
-    results_buffer = []
-    particulas_buffer = []
-    particulas_buffer_len = 0
-    processed_count = 0
+# ---------------------------------------------------------------------------
+# Listado de archivos
+# ---------------------------------------------------------------------------
 
-    tareas_gen = generar_tareas(xy_files, master_dict, args.dt)
+def listar_atascos(dirs, incluir=None):
+    """Una sola recorrida por el arbol (os.walk): junta los atasco_*.xy y
+    sus atasco_contacts_*.dat con el listado de cada carpeta, sin un
+    os.path.exists() por archivo (cada consulta al disco USB desde WSL es
+    lenta)."""
+    pares = []
+    for d in dirs:
+        for root, _, files in os.walk(d):
+            nombres = set(files)
+            for f in files:
+                if f.startswith('atasco_') and f.endswith('.xy') and not f.startswith('atasco_contacts_'):
+                    c = f.replace('atasco_', 'atasco_contacts_', 1)[:-3] + '.dat'
+                    if c in nombres:
+                        pares.append((os.path.join(root, f), os.path.join(root, c)))
+    return _filtrar_y_ordenar(pares, incluir)
 
+
+def leer_lista(path_lista, incluir=None):
+    """Lee una lista de rutas (una por linea) con los atasco_*.xy y
+    atasco_contacts_*.dat, por ejemplo generada desde Windows con
+    'dir /s /b' (mucho mas rapido que recorrer el disco desde WSL).
+    Acepta rutas de Windows (E:\\...) y las pasa a /mnt/e/..."""
+    xys, contactos = [], set()
+    with open(path_lista, encoding='utf-8', errors='replace') as f:
+        for linea in f:
+            p = linea.strip().replace('\r', '')
+            if not p:
+                continue
+            m = re.match(r'^([A-Za-z]):[\\/](.*)$', p)
+            if m:
+                p = f"/mnt/{m.group(1).lower()}/" + m.group(2).replace('\\', '/')
+            nombre = os.path.basename(p)
+            if nombre.startswith('atasco_contacts_') and nombre.endswith('.dat'):
+                contactos.add(p)
+            elif nombre.startswith('atasco_') and nombre.endswith('.xy'):
+                xys.append(p)
+    pares = []
+    for xy in xys:
+        d, n = os.path.split(xy)
+        c = os.path.join(d, n.replace('atasco_', 'atasco_contacts_', 1)[:-3] + '.dat')
+        if c in contactos:
+            pares.append((xy, c))
+    return _filtrar_y_ordenar(pares, incluir)
+
+
+def _filtrar_y_ordenar(pares, incluir):
+    if incluir:
+        rx = re.compile(incluir)
+        pares = [p for p in pares if rx.search(p[0])]
+    # orden por ruta: los archivos de una misma simulacion se leen juntos
+    # (en un disco rotativo eso reduce saltos del cabezal)
+    return sorted(pares)
+
+
+def generar_tareas(pares, master_dict, dt):
+    for xy_file, contact_file in pares:
+        jam_id = os.path.basename(xy_file).split('_')[-1].replace('.xy', '')
+        config_id = os.path.basename(os.path.dirname(xy_file))
+        abs_xy = os.path.abspath(os.path.normpath(xy_file))
+        sim_path = os.path.dirname(os.path.dirname(abs_xy))  # raiz de la simulacion
+        config_info = master_dict.get(sim_path)
+        if not config_info:
+            parts = sim_path.split(os.sep)
+            if len(parts) >= 2:
+                config_info = master_dict.get(os.path.join(parts[-2], parts[-1]), {})
+            else:
+                config_info = {}
+        yield (xy_file, contact_file, jam_id, config_id, dt,
+               config_info.get('r_large', np.nan), config_info.get('r_small', np.nan),
+               config_info.get('sides_large', np.nan), config_info.get('sides_small', np.nan),
+               config_info.get('chi', np.nan), sim_path)
+
+
+# ---------------------------------------------------------------------------
+# Escritura por lotes, reanudable
+# ---------------------------------------------------------------------------
+#
+# Cada lote (unos cientos de miles de filas de particulas) se guarda asi:
+#   1. out/partes/<forma>__<lote>.parquet   (un archivo por forma_grande)
+#   2. filas del lote en resumen_presion_por_atasco.csv (columna 'lote')
+#   3. los .xy del lote en procesados.txt ("<lote>\t<ruta>")
+#   4. el id del lote en lotes_ok.txt   <- recien aca el lote cuenta
+# Si la corrida se corta en cualquier punto, al reanudar se descartan los
+# restos de lotes que no llegaron al paso 4 y esos atascos se reprocesan:
+# no se pierde ni se duplica nada.
+
+META_PART = ['forma_grande', 'forma_chica', 'config_id', 'sim_path', 'jam_id', 'chi', 'id']
+META_ATASCO = ['forma_grande', 'forma_chica', 'chi', 'r_chica', 'config_id', 'sim_path', 'jam_id']
+
+
+class Registro:
+    def __init__(self, out_dir, reanudar):
+        self.out = out_dir
+        self.dir_partes = os.path.join(out_dir, 'partes')
+        self.f_ok = os.path.join(out_dir, 'lotes_ok.txt')
+        self.f_proc = os.path.join(out_dir, 'procesados.txt')
+        self.f_resumen = os.path.join(out_dir, 'resumen_presion_por_atasco.csv')
+        os.makedirs(self.dir_partes, exist_ok=True)
+        if not reanudar:
+            for f in (self.f_ok, self.f_proc, self.f_resumen):
+                if os.path.exists(f):
+                    os.remove(f)
+            for f in os.listdir(self.dir_partes):
+                os.remove(os.path.join(self.dir_partes, f))
+        self.lotes_ok = self._leer_ok()
+        # restos de lotes sin confirmar (corrida anterior cortada a la mitad)
+        for f in os.listdir(self.dir_partes):
+            lote = f.rsplit('__', 1)[-1].replace('.parquet', '')
+            if lote not in self.lotes_ok:
+                os.remove(os.path.join(self.dir_partes, f))
+        self.run = 1 + max([int(l.split('_')[0]) for l in self.lotes_ok] or [0])
+        self.n_lote = 0
+
+    def _leer_ok(self):
+        if not os.path.exists(self.f_ok):
+            return set()
+        with open(self.f_ok) as f:
+            return {l.strip() for l in f if l.strip()}
+
+    def ya_procesados(self):
+        hechos = set()
+        if os.path.exists(self.f_proc):
+            with open(self.f_proc) as f:
+                for l in f:
+                    lote, _, ruta = l.rstrip('\n').partition('\t')
+                    if lote in self.lotes_ok:
+                        hechos.add(ruta)
+        return hechos
+
+    def guardar_lote(self, particulas, resumenes, xy_files):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        self.n_lote += 1
+        lote = f"{self.run:03d}_{self.n_lote:05d}"
+        if particulas:
+            df = pd.concat(particulas, ignore_index=True)
+            df = df[[c for c in META_PART if c in df.columns] +
+                    [c for c in df.columns if c not in META_PART]]
+            for forma, sub in df.groupby('forma_grande', sort=False):
+                tmp = os.path.join(self.dir_partes, f".tmp_{forma}__{lote}.parquet")
+                pq.write_table(pa.Table.from_pandas(sub, preserve_index=False), tmp, compression='zstd')
+                os.replace(tmp, os.path.join(self.dir_partes, f"{forma}__{lote}.parquet"))
+            del df
+        if resumenes:
+            dr = pd.DataFrame(resumenes)
+            dr['lote'] = lote
+            dr = dr[[c for c in META_ATASCO if c in dr.columns] +
+                    [c for c in dr.columns if c not in META_ATASCO]]
+            dr.to_csv(self.f_resumen, mode='a', index=False, header=not os.path.exists(self.f_resumen))
+        with open(self.f_proc, 'a') as f:
+            f.writelines(f"{lote}\t{x}\n" for x in xy_files)
+        with open(self.f_ok, 'a') as f:
+            f.write(lote + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        self.lotes_ok.add(lote)
+
+
+def combinar_partes(out_dir, borrar=False):
+    """Junta out/partes/<forma>__*.parquet en un
+    presion_por_particula_<forma>.parquet por forma (el formato que lee
+    barrido_heatmap.py). Lee y escribe de a un archivo parcial por vez."""
+    import pyarrow.parquet as pq
+    dir_partes = os.path.join(out_dir, 'partes')
+    por_forma = collections.defaultdict(list)
+    for f in sorted(os.listdir(dir_partes)):
+        if f.endswith('.parquet') and not f.startswith('.tmp_'):
+            por_forma[f.rsplit('__', 1)[0]].append(os.path.join(dir_partes, f))
+    for forma, archivos in por_forma.items():
+        destino = os.path.join(out_dir, f"presion_por_particula_{forma}.parquet")
+        tmp = destino + ".tmp"
+        escritor, esquema, filas = None, None, 0
+        for a in archivos:
+            t = pq.read_table(a)
+            if escritor is None:
+                esquema = t.schema
+                escritor = pq.ParquetWriter(tmp, esquema, compression='zstd')
+            elif not t.schema.equals(esquema):
+                t = t.cast(esquema)
+            escritor.write_table(t)
+            filas += t.num_rows
+        escritor.close()
+        os.replace(tmp, destino)
+        print(f"  {os.path.basename(destino)}: {filas:,} filas ({len(archivos)} partes)", flush=True)
+        if borrar:
+            for a in archivos:
+                os.remove(a)
+
+
+def resumen_por_configuracion(out_dir, lotes_ok):
+    atasco_csv_path = os.path.join(out_dir, "resumen_presion_por_atasco.csv")
+    config_csv_path = os.path.join(out_dir, "resumen_presion_por_configuracion.csv")
+    if not os.path.exists(atasco_csv_path):
+        return
+    df_all = pd.read_csv(atasco_csv_path, dtype={'lote': str, 'jam_id': str})
+    if 'lote' in df_all.columns:
+        df_all = df_all[df_all['lote'].isin(lotes_ok)]
+    group_cols = ['forma_grande', 'forma_chica', 'chi', 'r_chica', 'config_id', 'sim_path']
+    grouped = df_all.groupby(group_cols, dropna=False)
+    df_config = grouped.size().reset_index(name='n_atascos')
+    variables_sumar = [c for c in df_all.columns
+                       if c.startswith('SumP_') or c.startswith('SumTau_') or c.startswith('Area_')]
+    cols_to_agg = variables_sumar
+    if not cols_to_agg:
+        return
+    df_sums = grouped[cols_to_agg].sum().reset_index(drop=True)
+    df_config = pd.concat([df_config, df_sums], axis=1)
+    # mean_<magnitud>_<region>[_B|_S] = Sum<magnitud>_<region>[_B|_S] / Area_<region>[_B|_S]
+    for c in cols_to_agg:
+        for pref, nombre in (('SumP_', 'mean_P_'), ('SumTau_', 'mean_tau_')):
+            if c.startswith(pref):
+                resto = c[len(pref):]                    # ej. 'reducida_arco_B' o 'arco_B'
+                area = 'Area_' + resto.replace('reducida_', '', 1)
+                if area in df_config.columns:
+                    df_config[nombre + resto] = df_config[c] / df_config[area]
+    df_config = df_config.drop(columns=cols_to_agg)
+    df_config.to_csv(config_csv_path, index=False)
+    print(f"Resumen por configuracion: {config_csv_path}", flush=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Tensor de esfuerzos, presion y corte por particula en cada atasco.")
+    parser.add_argument("--dir", nargs='+', default=None,
+                        help="carpeta(s) raiz de las simulaciones (se recorren recursivamente)")
+    parser.add_argument("--lista", default=None,
+                        help="archivo con la lista de atasco_*.xy y atasco_contacts_*.dat (una ruta "
+                             "por linea, sirve la salida de 'dir /s /b' de Windows); evita recorrer "
+                             "el disco desde WSL")
+    parser.add_argument("--incluir", default=None,
+                        help="regex sobre la ruta: procesa solo los atascos que coinciden "
+                             "(ej. 'Ratio_0p1_Chi_0p(0|2)_W')")
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--master", required=True)
+    parser.add_argument("--workers", type=int, default=os.cpu_count() or 4)
+    parser.add_argument("--dt", type=float, default=0.001)
+    parser.add_argument("--filas_lote", type=int, default=500_000,
+                        help="filas de particulas por lote guardado (default 500000)")
+    parser.add_argument("--reanudar", action="store_true",
+                        help="sigue una corrida cortada: saltea los atascos ya guardados en --out")
+    parser.add_argument("--solo_combinar", action="store_true",
+                        help="no procesa nada: solo junta out/partes/ en un parquet por forma")
+    parser.add_argument("--borrar_partes", action="store_true",
+                        help="borra out/partes/ despues de combinar")
+    args = parser.parse_args()
+
+    os.makedirs(args.out, exist_ok=True)
+
+    if args.solo_combinar:
+        print("Combinando partes...", flush=True)
+        combinar_partes(args.out, borrar=args.borrar_partes)
+        return
+
+    if not args.dir and not args.lista:
+        raise SystemExit("Hace falta --dir o --lista.")
+
+    registro = Registro(args.out, args.reanudar)
+
+    print("Cargando master index y parseando JSON de granos...", flush=True)
+    master_dict = cargar_master(args.master)
+
+    t_busq = time.time()
+    if args.lista:
+        print(f"Leyendo lista de archivos {args.lista}...", flush=True)
+        pares = leer_lista(args.lista, args.incluir)
+    else:
+        print("Recorriendo carpetas en busca de atasco_*.xy...", flush=True)
+        pares = listar_atascos(args.dir, args.incluir)
+    print(f"Atascos encontrados: {len(pares)}  (busqueda: {time.time() - t_busq:.0f} s)", flush=True)
+
+    if args.reanudar:
+        hechos = registro.ya_procesados()
+        antes = len(pares)
+        pares = [p for p in pares if p[0] not in hechos]
+        print(f"--reanudar: {antes - len(pares)} ya procesados, quedan {len(pares)}", flush=True)
+
+    total = len(pares)
+    part_buf, res_buf, xy_buf = [], [], []
+    filas_buf = 0
+    procesados = 0
+    errores = collections.Counter()
+    t0 = time.time()
+
+    def guardar():
+        nonlocal part_buf, res_buf, xy_buf, filas_buf
+        registro.guardar_lote(part_buf, res_buf, xy_buf)
+        part_buf, res_buf, xy_buf = [], [], []
+        filas_buf = 0
+        gc.collect()
+
+    tareas = generar_tareas(pares, master_dict, args.dt)
     with mp.Pool(processes=args.workers, maxtasksperchild=50) as pool:
-        for res in pool.imap_unordered(worker_wrapper, tareas_gen, chunksize=10):
-            processed_count += 1
+        for xy, res in pool.imap_unordered(worker_wrapper_con_ruta, tareas, chunksize=4):
+            procesados += 1
+            xy_buf.append(xy)   # tambien los fallidos: no tiene sentido reintentarlos
             if res["ok"]:
-                results_buffer.append(res["summary"])
-                particulas_buffer.append(res["particulas"])
-                particulas_buffer_len += len(res["particulas"])
-            
-            if len(results_buffer) >= FLUSH_SIZE:
-                write_buffer_to_csv(results_buffer, atasco_csv_path)
-                results_buffer.clear()
-                gc.collect() 
+                res_buf.append(res["summary"])
+                part_buf.append(res["particulas"])
+                filas_buf += len(res["particulas"])
+            else:
+                errores[res.get("error", "?")] += 1
+            if filas_buf >= args.filas_lote:
+                guardar()
+            if procesados % 200 == 0:
+                dtr = time.time() - t0
+                ritmo = procesados / dtr
+                resta = (total - procesados) / ritmo if ritmo > 0 else float('nan')
+                print(f"Procesados {procesados} de {total}  ({ritmo:.1f} atascos/s, "
+                      f"faltan ~{resta / 60:.0f} min, {sum(errores.values())} fallidos)", flush=True)
+    if xy_buf:
+        guardar()
 
-            if particulas_buffer_len >= FLUSH_SIZE_PART:
-                write_particulas_buffer(particulas_buffer, particulas_csv_path)
-                particulas_buffer.clear()
-                particulas_buffer_len = 0
-                gc.collect()
-            
-            if processed_count % 1000 == 0:
-                print(f"Procesados {processed_count} de {total_estimado}...")
+    print(f"\n{procesados} atascos en {(time.time() - t0) / 60:.1f} min, "
+          f"{sum(errores.values())} fallidos.", flush=True)
+    for msg, n in errores.most_common(10):
+        print(f"  {n:>6}  {msg}")
 
-    if results_buffer:
-        write_buffer_to_csv(results_buffer, atasco_csv_path)
-        results_buffer.clear()
+    print("\nCombinando partes en un parquet por forma_grande...", flush=True)
+    combinar_partes(args.out, borrar=args.borrar_partes)
+    resumen_por_configuracion(args.out, registro.lotes_ok)
 
-    if particulas_buffer:
-        write_particulas_buffer(particulas_buffer, particulas_csv_path)
-        particulas_buffer.clear()
 
-    print("\n--- Procesamiento finalizado. Calculando promedios... ---")
+def worker_wrapper_con_ruta(args):
+    return args[0], process_one_jam_task(*args)
 
-    if os.path.exists(atasco_csv_path):
-        df_all = pd.read_csv(atasco_csv_path)
-        group_cols = ['forma_grande', 'forma_chica', 'chi', 'r_chica', 'config_id', 'sim_path']
-        grouped = df_all.groupby(group_cols, dropna=False)
-        df_config = grouped.size().reset_index(name='n_atascos')
-        
-        variables_sumar = [
-            'SumP_bulk', 'Area_bulk', 'SumP_bulk_B', 'Area_bulk_B', 'SumP_bulk_S', 'Area_bulk_S',
-            'SumP_arco', 'Area_arco', 'SumP_arco_B', 'Area_arco_B', 'SumP_arco_S', 'Area_arco_S',
-            'SumP_roi', 'Area_roi', 'SumP_roi_B', 'Area_roi_B', 'SumP_roi_S', 'Area_roi_S',
-            'SumP_reducida_bulk', 'SumP_reducida_bulk_B', 'SumP_reducida_bulk_S',
-            'SumP_reducida_arco', 'SumP_reducida_arco_B', 'SumP_reducida_arco_S',
-            'SumP_reducida_roi', 'SumP_reducida_roi_B', 'SumP_reducida_roi_S'
-        ]
-        cols_to_agg = [var for var in variables_sumar if var in df_all.columns]
-        
-        if cols_to_agg:
-            df_sums = grouped[cols_to_agg].sum().reset_index(drop=True)
-            df_config = pd.concat([df_config, df_sums], axis=1)
-            
-            # Calculamos las presiones macroscópicas dividiendo la fuerza total entre el área total del grupo
-            for reg in ['bulk', 'arco', 'roi']:
-                df_config[f'mean_P_{reg}'] = df_config[f'SumP_{reg}'] / df_config[f'Area_{reg}']
-                df_config[f'mean_P_reducida_{reg}'] = df_config[f'SumP_reducida_{reg}'] / df_config[f'Area_{reg}']
-                for t in ['B', 'S']:
-                    # Si el área acumulada es 0, devolverá NaN
-                    df_config[f'mean_P_{reg}_{t}'] = df_config[f'SumP_{reg}_{t}'] / df_config[f'Area_{reg}_{t}']
-                    df_config[f'mean_P_reducida_{reg}_{t}'] = df_config[f'SumP_reducida_{reg}_{t}'] / df_config[f'Area_{reg}_{t}']
-            
-            df_config = df_config.drop(columns=variables_sumar)
-            
-            df_config.to_csv(config_csv_path, index=False)
-            print(f"Finalizado - Archivo definitivo guardado en: {config_csv_path}")
 
 if __name__ == "__main__":
-    mp.freeze_support() 
+    mp.freeze_support()
     main()
