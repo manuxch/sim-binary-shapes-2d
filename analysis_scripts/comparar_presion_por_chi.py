@@ -25,6 +25,19 @@ check_ratio_tamano.py, la misma razon fisica que "Ratio_0p1" (0.158/0.5
 al cuadrado ~ 0.0999) -- asi que se funden automaticamente dentro de ese
 grupo.
 
+Barras de error: dispersion ENTRE ATASCOS (cada atasco es una muestra;
+las particulas de un mismo atasco no son independientes). Para cada
+atasco se calcula su media en la region (Sum/Area de ese atasco) y, para
+cada forma+chi, la dispersion de esas medias pesada por el area del
+atasco en la region -- el mismo peso que usa el punto central, que es
+Sum total / Area total:
+  --error std (default): desviacion estandar pesada
+  --error sem           : error estandar = std / sqrt(n_eff),
+                          n_eff = (sum w)^2 / sum w^2 (atascos efectivos)
+  --error ninguno       : sin barras
+Ademas se guarda <out>_datos.csv con media, std, sem, n y n_eff de cada
+punto.
+
 Si el csv viene de presion_tensor_arch.py con lotes reanudables (columna
 'lote'), solo se usan las filas de lotes confirmados en lotes_ok.txt
 (misma carpeta que el csv): asi un lote a medio escribir de una corrida
@@ -94,12 +107,31 @@ def filtrar_lotes_confirmados(df, csv_path):
     return df
 
 
+def _estadistica_pesada(x, w):
+    """Media, desviacion estandar, error estandar y n de las medias por
+    atasco x, pesadas por w (area del atasco en la region). Los atascos
+    sin area en la region (w = 0, ej. sin chicas en el arco) no cuentan."""
+    ok = np.isfinite(x) & (w > 0)
+    x, w = x[ok], w[ok]
+    n = len(x)
+    if n == 0:
+        return np.nan, np.nan, np.nan, 0, 0.0
+    sw = w.sum()
+    media = (w * x).sum() / sw
+    n_eff = sw ** 2 / (w ** 2).sum()
+    if n < 2 or n_eff <= 1:
+        return media, np.nan, np.nan, n, n_eff
+    # varianza pesada insesgada (pesos de "confiabilidad")
+    var = (w * (x - media) ** 2).sum() / (sw - (w ** 2).sum() / sw)
+    std = np.sqrt(var)
+    return media, std, std / np.sqrt(n_eff), n, n_eff
+
+
 def agregar_por_forma_y_chi(df, magnitudes, regiones=REGIONES):
-    """Suma <prefijo>_{region}_{B,S} y Area_{region}_{B,S} agrupando SOLO
-    por (forma_grande, chi) -- pooleando todos los atascos de cualquier
-    configuracion/ancho que comparta ese chi -- y recien ahi divide, para
-    tener un unico punto, correctamente ponderado por area, por cada
-    combinacion forma+chi."""
+    """Un punto por (forma_grande, chi), pooleando todos los atascos de
+    cualquier configuracion/ancho que comparta ese chi. El valor central es
+    Sum total / Area total (media pesada por area); la dispersion es la de
+    las medias por atasco, con el mismo peso."""
     cols_necesarias = []
     for region in regiones:
         for t in ('B', 'S'):
@@ -113,34 +145,80 @@ def agregar_por_forma_y_chi(df, magnitudes, regiones=REGIONES):
                  if any(c.startswith('SumTau') for c in faltantes) else "")
         raise SystemExit(f"Al csv le faltan columnas {faltantes}.{pista}")
 
-    g = df.groupby(['forma_grande', 'chi'], dropna=False)
-    out = g[cols_necesarias].sum().reset_index()
-    out['n_atascos'] = g.size().to_numpy()
+    filas = []
+    for (forma, chi), g in df.groupby(['forma_grande', 'chi'], dropna=False):
+        fila = {'forma_grande': forma, 'chi': chi, 'n_atascos': len(g)}
+        for mag in magnitudes:
+            pref = MAGNITUDES[mag][0]
+            for region in regiones:
+                for t in ('B', 'S'):
+                    w = g[f'Area_{region}_{t}'].to_numpy(dtype=float)
+                    suma = g[f'{pref}_{region}_{t}'].to_numpy(dtype=float)
+                    with np.errstate(invalid='ignore', divide='ignore'):
+                        x = np.where(w > 0, suma / w, np.nan)
+                    media, std, sem, n, n_eff = _estadistica_pesada(x, w)
+                    clave = f'{mag}_{region}_{t}'
+                    fila[f'mean_{clave}'] = media
+                    fila[f'std_{clave}'] = std
+                    fila[f'sem_{clave}'] = sem
+                    fila[f'n_{clave}'] = n
+                    fila[f'neff_{clave}'] = n_eff
+        filas.append(fila)
+    return pd.DataFrame(filas)
 
-    for mag in magnitudes:
-        pref = MAGNITUDES[mag][0]
+
+def limites_y(df_agg, formas, mags, error, regiones=REGIONES, margen=0.05):
+    """(ymin, ymax) que abarcan todos los puntos y sus barras de error de
+    las formas y magnitudes dadas, con un margen. Nunca por debajo de 0
+    (presion y corte medios son positivos; una barra de std puede
+    extenderse por debajo de 0 pero el eje no necesita mostrarlo)."""
+    lo, hi = [], []
+    sub = df_agg[df_agg['forma_grande'].isin(formas)]
+    for mag in mags:
         for region in regiones:
             for t in ('B', 'S'):
-                out[f'mean_{mag}_{region}_{t}'] = out[f'{pref}_{region}_{t}'] / out[f'Area_{region}_{t}']
-    return out
+                y = sub[f'mean_{mag}_{region}_{t}'].to_numpy(dtype=float)
+                e = (np.zeros_like(y) if error == 'ninguno'
+                     else np.nan_to_num(sub[f'{error}_{mag}_{region}_{t}'].to_numpy(dtype=float)))
+                ok = np.isfinite(y)
+                if ok.any():
+                    lo.append(np.min(y[ok] - e[ok]))
+                    hi.append(np.max(y[ok] + e[ok]))
+    if not lo:
+        return None
+    ymin, ymax = min(lo), max(hi)
+    pad = margen * (ymax - ymin if ymax > ymin else abs(ymax) or 1.0)
+    return max(0.0, ymin - pad), ymax + pad
 
 
-def graficar_una_forma(df_agg, forma, mag, etiqueta_chi, regiones=REGIONES):
+def graficar_una_forma(df_agg, forma, mag, etiqueta_chi, error='std', desplazar=0.0,
+                       ylim=None, regiones=REGIONES):
     """Una sola figura, para una sola forma de grano grande y una magnitud:
-    arco vs roi, grandes vs chicas, en funcion de chi."""
+    arco vs roi, grandes vs chicas, en funcion de chi, con barras de error."""
     colores = {regiones[0]: COLOR_ARCO, regiones[1]: COLOR_ROI}
     sub = df_agg[df_agg['forma_grande'] == forma].sort_values('chi')
+    chi = sub['chi'].to_numpy(dtype=float)
+    paso = desplazar * (np.nanmax(chi) - np.nanmin(chi) if len(chi) > 1 else 1.0)
 
     fig, ax = plt.subplots(figsize=(6.5, 5))
-    for region in regiones:
+    series = [(region, t) for region in regiones for t in ('B', 'S')]
+    for k, (region, t) in enumerate(series):
         color = colores[region]
-        ax.plot(sub['chi'], sub[f'mean_{mag}_{region}_B'], color=color, linestyle='-',
-                marker='o', markersize=4, label=f'{region} — grandes')
+        clave = f'{mag}_{region}_{t}'
+        y = sub[f'mean_{clave}'].to_numpy(dtype=float)
+        yerr = None if error == 'ninguno' else sub[f'{error}_{clave}'].to_numpy(dtype=float)
+        # desplazamiento horizontal opcional, para que las barras no se tapen
+        dx = (k - (len(series) - 1) / 2) * paso
         # Las chicas no existen en chi=0 (Area=0 -> NaN); matplotlib corta
         # la linea ahi solo, no hace falta filtrar a mano.
-        ax.plot(sub['chi'], sub[f'mean_{mag}_{region}_S'], color=color, linestyle='--',
-                marker='s', markersize=4, label=f'{region} — chicas')
+        ax.errorbar(chi + dx, y, yerr=yerr, color=color,
+                    linestyle='-' if t == 'B' else '--',
+                    marker='o' if t == 'B' else 's', markersize=4,
+                    capsize=2.5, elinewidth=0.8, capthick=0.8,
+                    label=f'{region} — {"grandes" if t == "B" else "chicas"}')
 
+    if ylim is not None:
+        ax.set_ylim(*ylim)
     ax.set_title(forma)
     ax.set_xlabel(etiqueta_chi)
     ax.set_ylabel(MAGNITUDES[mag][1])
@@ -162,6 +240,21 @@ def main():
                         help='Lista de forma_grande a incluir (default: todas las presentes en el csv)')
     parser.add_argument('--chi_min', type=float, default=None)
     parser.add_argument('--chi_max', type=float, default=None)
+    parser.add_argument('--error', choices=['std', 'sem', 'ninguno'], default='std',
+                        help="Barras de error entre atascos: std = desviacion estandar (default), "
+                             "sem = error estandar de la media, ninguno = sin barras")
+    parser.add_argument('--desplazar', type=float, default=0.0,
+                        help="Desplazamiento horizontal entre series, como fraccion del rango de "
+                             "chi (ej. 0.004), para que las barras no se superpongan. Default 0.")
+    parser.add_argument('--escala_y', choices=['por_magnitud', 'comun', 'libre'],
+                        default='por_magnitud',
+                        help="por_magnitud (default): todas las figuras de P con el mismo eje y, y "
+                             "todas las de tau con otro; comun: P y tau con el mismo eje y; "
+                             "libre: cada figura con su propio eje y (como antes)")
+    parser.add_argument('--ylim_P', type=float, nargs=2, default=None, metavar=('YMIN', 'YMAX'),
+                        help='fuerza el eje y de las figuras de presion')
+    parser.add_argument('--ylim_tau', type=float, nargs=2, default=None, metavar=('YMIN', 'YMAX'),
+                        help='fuerza el eje y de las figuras de corte')
     parser.add_argument('--etiqueta_chi', default=r'$\chi$ (fracción de área de chicas)',
                         help='Texto del eje x')
     args = parser.parse_args()
@@ -192,13 +285,38 @@ def main():
     print(df_agg[['forma_grande', 'chi', 'n_atascos']].to_string(index=False))
 
     base, ext = os.path.splitext(args.out)
+    if os.path.dirname(args.out):
+        os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    datos_path = f"{base}_datos.csv"
+    df_agg.to_csv(datos_path, index=False)
+    print(f"Valores graficados (media, std, sem, n, n_eff): {datos_path}")
+    print(f"Barras de error: {args.error}")
+
+    # Eje y compartido (incluye las barras de error de todas las formas)
+    formas_ok = [f for f in formas if f in df_agg['forma_grande'].values]
+    ylims = {}
+    if args.escala_y == 'comun':
+        lim = limites_y(df_agg, formas_ok, magnitudes, args.error)
+        ylims = {m: lim for m in magnitudes}
+    elif args.escala_y == 'por_magnitud':
+        ylims = {m: limites_y(df_agg, formas_ok, [m], args.error) for m in magnitudes}
+    if args.ylim_P is not None:
+        ylims['P'] = tuple(args.ylim_P)
+    if args.ylim_tau is not None:
+        ylims['tau'] = tuple(args.ylim_tau)
+    for m, lim in ylims.items():
+        if lim is not None and m in magnitudes:
+            print(f"Eje y {m}: [{lim[0]:.4g}, {lim[1]:.4g}]  "
+                  f"(para fijarlo: --ylim_{m} {lim[0]:.4g} {lim[1]:.4g})")
     for mag in magnitudes:
         sufijo = MAGNITUDES[mag][2]
         for forma in formas:
             if forma not in df_agg['forma_grande'].values:
                 print(f"(sin datos para {forma!r}, se salta)")
                 continue
-            fig = graficar_una_forma(df_agg, forma, mag, args.etiqueta_chi)
+            fig = graficar_una_forma(df_agg, forma, mag, args.etiqueta_chi,
+                                     error=args.error, desplazar=args.desplazar,
+                                     ylim=ylims.get(mag))
             out_path = f"{base}{sufijo}_{forma}{ext}"
             fig.savefig(out_path, dpi=200, bbox_inches='tight')
             plt.close(fig)
