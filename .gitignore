@@ -18,4 +18,19 @@ processed_data_old*/
 *.mp4
 *presion_por_particula.csv
 videos/
-analysis_scripts/por_forma
+por_forma/
+
+# Archivos pesados: viven solo en el disco local (ver migrar_datos_locales.sh)
+lista_atascos*.txt
+*.npz
+*.parquet
+heatmaps_*_v4/
+processed_data/mapas_calor/frames_v4/
+processed_data/_sin_clasificar/
+
+# Artefactos de compilacion del simulador
+simulation/bin/
+simulation/obj/
+
+# Repositorio aparte (antes submodulo roto)
+render/

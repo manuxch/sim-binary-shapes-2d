@@ -1,77 +1,69 @@
-# Bidisperse Granular Jamming in Silos: Simulation & Analysis Pipeline
+# Atascos en silos 2D con mezclas binarias de formas
 
-This repository contains the computational pipeline used to simulate, process, and analyze the discharging and jamming of vibrated bidisperse granular media. The project focuses on the study of segregation, avalanche dynamics, and force networks (arches) using mixtures of disks and polygons.
+Simulación y análisis del flujo y atascamiento de medios granulares bidispersos (discos y polígonos) en un silo 2D vibrado. Se estudian avalanchas, arcos, fuerzas de contacto y el tensor de tensiones / presión en función de la fracción de área de partículas chicas (χ), la razón de tamaños y la forma.
 
-The simulations are performed using **LIGGGHTS**, and the entire post-processing pipeline is built in **Python**, utilizing parallel computing to handle massive datasets.
+- **Simulador:** C++ con **Box2D 2.4.2** (`simulation/`, ejecutable `eo-silo`).
+- **Análisis:** Python (numpy, pandas, networkx, matplotlib, pyarrow) y algunos scripts de gnuplot.
 
-## 📂 Repository Structure
-
-The workflow is strictly modular. Raw simulation data (heavy `dumps` and `.xy` files) are kept out of the repository (via `.gitignore`), while the Python pipeline extracts, indexes, and plots the relevant physical metrics.
+## Estructura
 
 ```text
-jamming_bidisperso_vibrado/
-├── LIGGGHTS_scripts/          # Input scripts (in.local, in.params) for the simulation engine
-├── python_analysis/           # Core analysis pipeline
-│   ├── indexer.py             # Generates a master CSV using MD5 hashes for physical parameters
-│   ├── processor.py           # Extracts avalanches and spatial data (.npz) from raw .xy/dumps
-│   ├── main_pipeline.py       # Master script that executes the full statistical analysis
-│   ├── flow_analysis.py       # Calculates flow curves and avalanche size distributions
-│   ├── arch_analysis.py       # NetworkX-based arch and force network detection
-│   ├── density_map.py         # Generates heatmaps for spatial distribution
-│   ├── plot_profiles.py       # Velocity and kinematic profiles along the silo
-│   ├── wall_chi_variation.py  # Calculates segregation parameter ($\chi$) near the walls
-│   ├── plot_wall_chi.py       # Plots the loss of $\chi$ against the injected $\chi$
-│   └── temporal_chi.py        # Dynamics of the segregation parameter during discharge
-├── output_results/            # Auto-generated folders by the pipeline
-│   ├── 1_avalanche_data/      
-│   ├── 2_spatial_maps/        
-│   ├── 3_tail_distributions/  
-│   ├── 4_velocity_profiles/   
-│   └── 5_segregation_analysis/
-└── README.md
+sim-binary-shapes-2d/
+├── simulation/                     # Código C++ del simulador (Box2D)
+│   ├── Makefile                    # make -> bin/eo-silo (bin/ y obj/ no se versionan)
+│   └── src/
+├── run_scripts/                    # Lanzar simulaciones
+│   ├── params_template.in          # Plantilla de parámetros
+│   ├── run_slurm_cluster_utn.sh    # Barridos en el cluster (SLURM)
+│   ├── sweep_*.sh                  # Barridos locales (altura, ancho, orificio, mezcla)
+│   ├── pack_simulations.sh, renderizar_all.sh
+│   └── viejo.tar.gz                # Versión anterior del paquete UTN
+├── analysis/
+│   ├── 1_avalanchas_y_arcos/       # Pipeline principal (main_pipeline.py)
+│   ├── 2_fuerzas/                  # Fuerza normal en arco / ROI por tipo de contacto
+│   ├── 3_presion_y_mapas/          # Tensor de tensiones, presión y mapas de calor
+│   ├── 4_correlaciones_gnuplot/    # Gráficos cruzados (avalanchas vs tortuosidad, Fn, ...)
+│   └── utils/                      # Diagnósticos puntuales
+└── processed_data/                 # Resultados (figuras); los CSV/npz/parquet quedan solo en disco
+    ├── 5_graficos_finales/
+    ├── fuerzas/   (pdf_v4/, pdf_en_paper/, datos_v4/*)
+    ├── presion/
+    └── mapas_calor/ (heatmap_*.png, frames_v4/*)
 ```
+`*`: solo en disco local, no se versiona.
 
-## 🚀 Setup & Installation
+Cada carpeta de `analysis/` y `processed_data/` puede tener un `viejo.tar.gz` con las versiones anteriores de los scripts o figuras (para ver qué hay adentro: `tar tzf viejo.tar.gz`; para extraerlo: `tar xzf viejo.tar.gz`).
 
-To ensure reproducibility and avoid dependency conflicts, it is highly recommended to run this pipeline within an isolated Conda environment (e.g., using `miniforge` or `miniconda`).
+## Flujo de trabajo
 
-1. **Clone the repository:**
+1. **Compilar y simular**
    ```bash
-   git clone git@github.com:yourusername/jamming_bidisperso_vibrado.git
-   cd jamming_bidisperso_vibrado
+   cd simulation && make            # requiere Box2D en ../../box2d y GSL
+   # copiar bin/eo-silo junto a run_scripts/ y lanzar un barrido
+   ```
+2. **Avalanchas y arcos** (indexa simulaciones, detecta avalanchas y arcos, consolida y grafica)
+   ```bash
+   python analysis/1_avalanchas_y_arcos/main_pipeline.py
+   python analysis/1_avalanchas_y_arcos/graficos_finales.py
+   ```
+   Genera `master_sim_index.csv` y `processed_data/1_avalanche_data/`.
+3. **Fuerzas**
+   ```bash
+   python analysis/2_fuerzas/force_arch_v4.py --idx master_sim_index.csv --out processed_data/fuerzas/datos_v4
+   bash   analysis/2_fuerzas/graficar_todas_configuraciones.sh   # -> processed_data/fuerzas/pdf_v4
+   ```
+4. **Presión y mapas de calor**
+   ```bash
+   python analysis/3_presion_y_mapas/presion_tensor_arch.py ...      # -> presion_por_particula.csv
+   python analysis/3_presion_y_mapas/dividir_particulas_por_forma.py --csv presion_por_particula.csv --out_dir por_forma/
+   python analysis/3_presion_y_mapas/hacer_mapas.py                  # todos los mapas de una vez
+   python analysis/3_presion_y_mapas/comparar_presion_por_chi.py --csv resumen_presion_por_atasco.csv
    ```
 
-2. **Create and activate the environment:**
-   ```bash
-   conda create --name sim_env python=3.11 numpy pandas scipy matplotlib networkx
-   conda activate sim_env
-   ```
+Los scripts dentro de una misma carpeta de `analysis/` se importan entre sí: hay que mantenerlos juntos.
 
-## ⚙️ Usage Workflow
+## Notas
 
-### 1. Indexing
-Before running any analysis, the pipeline must scan the raw LIGGGHTS output directories. It reads the `params.in` files, identifies the geometry of the grains (disks/polygons), and groups statistically equivalent runs (TIRADA 1, 2, 3) using MD5 hashing.
-```bash
-python python_analysis/indexer.py
-```
-*Output: `master_sim_index.csv`*
-
-### 2. Processing Pre-computation
-This step parses the heavy raw files (like `.xy` coordinates) to detect discrete avalanches (using time thresholds) and generate lightweight spatial matrices (`.npz`).
-```bash
-python python_analysis/processor.py
-```
-
-### 3. Full Statistical Analysis
-Once indexed and pre-processed, you can trigger the complete analytical suite. This will generate all the plots (flow curves, segregation profiles, velocity heatmaps) across all available CPU cores.
-```bash
-python python_analysis/main_pipeline.py
-```
-
-## 🔬 Key Physical Metrics Analyzed
-* **Avalanche Statistics:** Logarithmic tail distributions for jamming events.
-* **Segregation Parameter ($\chi$):** Evaluation of additive concentration in the bulk vs. silo walls.
-* **Force Arches:** Identification of mechanical stability structures blocking the outlet.
-
----
-*Developed for research in granular matter physics.*
+- Varios scripts del paso 1 usan rutas absolutas a `/home/juli/work/lab/project/sim-binary-shapes-2d/...`.
+- `migrar_datos_locales.sh`: correrlo una vez después del pull de la reorganización para recuperar los archivos pesados y acomodar los datos locales.
+- `AUDITORIA_REORGANIZACION.md`: detalle de qué se movió, a dónde y por qué.
