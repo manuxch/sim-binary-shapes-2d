@@ -78,7 +78,7 @@ if [ "$RESP" != "SI" ]; then
 fi
 git remote add origin "$URL_GITHUB" 2>/dev/null || git remote set-url origin "$URL_GITHUB"
 git push --force origin main:main
-for r in $OTRAS; do git push origin --delete "$r"; done
+for r in $OTRAS; do git push origin --delete "$r" || echo "    [aviso] No pude borrar la rama $r: borrala desde la web de GitHub (Branches)."; done
 git push --force --tags origin 2>/dev/null || true
 
 echo
