@@ -14,7 +14,7 @@
     ],
 
     "python.terminal.activateEnvInSelectedTerminal": true,
-    "python-envs.defaultEnvManager": "ms-python.python:system"
+    "python-envs.defaultEnvManager": "ms-python.python:system",
     "files.exclude": {
         "**/.git": true,
         "**/.DS_Store": true,
