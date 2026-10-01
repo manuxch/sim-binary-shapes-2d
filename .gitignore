@@ -34,3 +34,6 @@ simulation/obj/
 
 # Repositorio aparte (antes submodulo roto)
 render/
+
+# Figuras viejas exportadas del historial (limpieza_historial/1_exportar_historico.py)
+processed_data/_historico/
