@@ -74,10 +74,12 @@ done
 for f in analysis_scripts/heatmap_*.npz; do mover "$f" processed_data/mapas_calor; done
 for f in analysis_scripts/resultados_viejos/*.npz; do mover "$f" processed_data/mapas_calor/viejo_npz; done
 
+# "no pisar": coreutils nuevos piden --update=none; los viejos solo tienen -n
+if cp --update=none /dev/null "$(mktemp -u)" 2>/dev/null; then NO_PISAR="--update=none"; else NO_PISAR="-n"; fi
 restaurar() {  # restaurar <origen_en_TMP> <destino>
     [ -e "$1" ] || return 0
     mkdir -p "$2"
-    if [ -d "$1" ]; then cp -rn "$1/." "$2/"; else cp -n "$1" "$2/"; fi
+    if [ -d "$1" ]; then cp -r $NO_PISAR "$1/." "$2/"; else cp $NO_PISAR "$1" "$2/"; fi
 }
 for d in "$TMP"/analysis_scripts/heatmaps_*_v4; do
     restaurar "$d" "processed_data/mapas_calor/frames_v4/$(basename "$d")"
