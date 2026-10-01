@@ -1,6 +1,6 @@
 # Auditoría y plan de reorganización del repositorio
 
-> Estado: **propuesta, todavía no se movió nada.**
+> Estado: **aplicado** (ver sección 7 para las decisiones tomadas y diferencias con la propuesta).
 > Fechas tomadas del historial de git: primer commit en que aparece cada archivo y último commit que lo modificó.
 > (Las fechas del sistema de archivos no sirven: el clon las pone todas iguales.)
 
@@ -122,3 +122,42 @@ Se elimina: `processed_data/old_para_borrar/` (contenido va a `3_presion_y_mapas
 - Reescribir el `README.md` con la estructura real y el orden de ejecución.
 - Arreglar `.vscode/settings.json` (coma faltante).
 - Más adelante: centralizar las rutas absolutas en un `config.py` (no lo hago ahora para no tocar lógica).
+
+---
+
+## 7. Lo que se aplicó
+
+Decisiones:
+1. Archivos pesados (frames `heatmaps_*_v4`, `*.npz`, `lista_atascos*.txt`, `simulation/bin`, `simulation/obj`) → fuera de git, en `.gitignore`. Siguen en tu disco gracias a `migrar_datos_locales.sh`.
+2. `old.tar` y `codigo_mezcla_poligono_UTN.zip` → extraídos y repartidos en las carpetas `viejo/` de cada tema.
+3. `lista_atascos*.txt` → quedan en la raíz, solo en disco.
+4. Cada `viejo/` se comprimió en un `viejo.tar.gz` en la misma carpeta:
+
+| Archivo | Contenido | Tamaño |
+|---|---|---|
+| `analysis/1_avalanchas_y_arcos/viejo.tar.gz` | 13 scripts (versiones de abril-mayo del pipeline, `graficos_finales_old/espanol`, `tail_distribution_chi`) | 160K → 32K |
+| `analysis/2_fuerzas/viejo.tar.gz` | `force_arch`, v1, v2, `force_arch_v3_contact`, `graficar_arco_fuerza` viejo, pipeline gnuplot de `forces_old/` | 200K → 36K |
+| `analysis/3_presion_y_mapas/viejo.tar.gz` | `grafico_tension_silo`, `tensor_arch`, `analisis_tensorial`, `.gp` de `old_para_borrar` | 52K → 12K |
+| `run_scripts/viejo.tar.gz` | contenido del zip UTN (`eo-silo`, `params_template.in`, `run_slurm.sh` de abril) | 2.0M → 660K |
+| `processed_data/fuerzas/viejo.tar.gz` | PDFs `graficos_fuerza_old/` y `graficos_fuerzas_promediando_fuerzas_totales/` | 1.0M → 328K |
+| `processed_data/mapas_calor/viejo.tar.gz` | PNG de `resultados_viejos/` (los `.npz` quedan en disco en `mapas_calor/viejo_npz/`) | 10.6M → 10.5M |
+
+Las versiones sin comprimir quedan igualmente en el historial de git (commit "Reorganiza el repositorio por tema...").
+
+Rutas actualizadas en código:
+- `2_fuerzas/plot_fuerza_por_tipo_contacto.py` lee `processed_data/fuerzas/datos_v4/resumen_fuerza_normal_por_configuracion.csv`.
+- `2_fuerzas/graficar_todas_configuraciones.sh` lee de ahí y escribe los PDF en `processed_data/fuerzas/pdf_v4/`.
+- `4_correlaciones_gnuplot/fuerza_normal_y_avalancha.gp` lee `processed_data/fuerzas/datos_viejo/resumen_fuerza_normal_por_atasco.csv` (antes `forces_old/`).
+
+Datos locales (los mueve `migrar_datos_locales.sh`):
+
+| Antes | Ahora |
+|---|---|
+| `analysis_scripts/heatmaps_*_v4/` | `processed_data/mapas_calor/frames_v4/` |
+| `analysis_scripts/heatmap_*.npz` | `processed_data/mapas_calor/` |
+| `analysis_scripts/resultados_viejos/*.npz` | `processed_data/mapas_calor/viejo_npz/` |
+| `analysis_scripts/por_forma/` | `processed_data/presion/por_forma/` |
+| `processed_data/forces_new_19-08/*` (CSV) | `processed_data/fuerzas/datos_v4/` |
+| `processed_data/forces_old/*` (CSV) | `processed_data/fuerzas/datos_viejo/` |
+| `processed_data/correlation/*` | `processed_data/correlaciones/` |
+| cualquier otra cosa en `analysis_scripts/` u `old_para_borrar/` | `processed_data/_sin_clasificar/` (para revisar a mano) |
