@@ -13,58 +13,14 @@ matplotlib.use('Agg')  # backend sin display; evita fallos silenciosos de
 import matplotlib.pyplot as plt
 
 # =============================================================================
-# ESTILO -- el mismo de graficos_finales.py
+# ESTILO -- comun a todos los scripts (estilo_figuras.py, base: graficos_finales.py)
 # =============================================================================
-# Colores y marcadores por sistema (paleta Wong), nombres en ingles para las
-# leyendas, y tamaños de fuente de set_plot_fonts(). Copiados tal cual de
-# AnalysisConfig / SYSTEM_NAME_MAP de graficos_finales.py: si se cambian
-# alla, cambiarlos tambien aca.
-
-SYSTEM_STYLE = {
-    'Disco(G)-Disco(C)': ('#000000', 'o'),
-    'Disco(G)-Tri(C)':   ('#E69F00', '^'),
-    'Disco(G)-Cuad(C)':  ('#D55E00', 's'),
-    'Disco(G)-Pent(C)':  ('#CC79A7', 'p'),
-    'Tri(G)-Disco(C)':   ('#009E73', '^'),
-    'Cuad(G)-Disco(C)':  ('#56B4E9', 's'),
-    'Pent(G)-Disco(C)':  ('#0072B2', 'p'),
-}
-
-ENGLISH_LABELS = {
-    'Disco(G)-Disco(C)': 'Disk-Disk',
-    'Disco(G)-Tri(C)':   'Disk-Triangle',
-    'Disco(G)-Cuad(C)':  'Disk-Square',
-    'Disco(G)-Pent(C)':  'Disk-Pentagon',
-    'Tri(G)-Disco(C)':   'Triangle-Disk',
-    'Cuad(G)-Disco(C)':  'Square-Disk',
-    'Pent(G)-Disco(C)':  'Pentagon-Disk',
-}
-
-SYSTEM_NAME_MAP = {
-    'Disco-Disco': 'Disco(G)-Disco(C)',
-    'Disco-Tri':   'Disco(G)-Tri(C)',
-    'Disco-Cuad':  'Disco(G)-Cuad(C)',
-    'Disco-Pent':  'Disco(G)-Pent(C)',
-    'Tri-Disco':   'Tri(G)-Disco(C)',
-    'Cuad-Disco':  'Cuad(G)-Disco(C)',
-    'Pent-Disco':  'Pent(G)-Disco(C)',
-}
-
-
-def set_plot_fonts(labels: int = 20, ticks: int = 16, legend: int = 14):
-    plt.rcParams.update({
-        'axes.labelsize': labels,
-        'xtick.labelsize': ticks,
-        'ytick.labelsize': ticks,
-        'legend.fontsize': legend,
-        'text.usetex': False,
-        'mathtext.fontset': 'stix',
-        'font.family': 'STIXGeneral',
-    })
-
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from estilo_figuras import aplicar_estilo, estilo_sistema, REF_LINE_KW
 
 # a nivel de modulo, asi los procesos del Pool tambien lo tienen
-set_plot_fonts()
+aplicar_estilo()
 
 # =============================================================================
 # CONFIGURACIÓN (valores por defecto; se cambian por argumentos)
@@ -77,13 +33,6 @@ FORMATO = 'pdf'      # igual que save_plot() de graficos_finales.py
 # /home/juli/work/... pero en esta PC el disco esta en /mnt/h/work/...).
 PREFIJO_VIEJO = None
 PREFIJO_NUEVO = None
-
-
-def estilo_sistema(system_type):
-    """(color, marcador, etiqueta en ingles) del sistema, como en graficos_finales.py."""
-    sistema = SYSTEM_NAME_MAP.get(str(system_type), str(system_type))
-    color, marker = SYSTEM_STYLE.get(sistema, ('black', 'o'))
-    return color, marker, ENGLISH_LABELS.get(sistema, str(system_type))
 
 
 def analizar_flujo_temporal(row):
@@ -170,8 +119,8 @@ def analizar_flujo_temporal(row):
 
         plt.figure()
         # referencia: linea negra discontinua, como el chi = 0 de graficos_finales.py
-        plt.axhline(y=chi_nominal, color='black', linestyle='--',
-                    label=rf'Nominal $\chi = {chi_nominal:.3g}$', zorder=1)
+        plt.axhline(y=chi_nominal, **REF_LINE_KW,
+                    label=rf'Nominal $\chi = {chi_nominal:.3g}$')
         plt.plot(df_plot['tiempo'], df_plot['chi_eff'], f'{marker}-', color=color,
                  label=rf'$\chi_{{out}}$ ({WINDOW_SIZE:g} s windows)', zorder=2)
 
@@ -189,7 +138,7 @@ def analizar_flujo_temporal(row):
         plt.xlabel(r"Simulation Time (s)")
         plt.ylabel(r"Outflow Concentration $\chi_{out}$")
         plt.ylim(0, min(1.0, max(chi_nominal * 2.5, df_plot['chi_eff'].max() * 1.3, 0.05)))
-        plt.legend(title=f"{label_en}, run {tirada}", title_fontsize=14, loc='upper right')
+        plt.legend(title=f"{label_en}, run {tirada}", loc='upper right')
 
         graph_name = f"dinamica_flujo_final_{sim_hash}_T{tirada}.{FORMATO}"
         plt.savefig(os.path.join(path, graph_name), bbox_inches='tight')

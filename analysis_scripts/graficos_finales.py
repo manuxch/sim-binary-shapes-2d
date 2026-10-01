@@ -7,6 +7,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+from estilo_figuras import (SYSTEM_STYLE, ENGLISH_LABELS, SYSTEM_NAME_MAP,
+                            set_plot_fonts, aplicar_estilo, ERRORBAR_KW,
+                            REF_LINE_KW, SEQ_STYLE, anotar_chi)
+
 # =============================================================================
 # CONFIGURACIÓN GLOBAL
 # =============================================================================
@@ -14,30 +18,14 @@ import seaborn as sns
 @dataclass
 class AnalysisConfig:
     """Rutas y estilos comunes para todas las figuras."""
-    data_path: str = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/estadisticas_flujo_agregadas.csv"
-    arcos_path: str = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_arcos.csv"
-    raw_flow_path: str = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"
-    out_dir: str = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/5_graficos_finales"
+    data_path: str = "/mnt/e/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/estadisticas_flujo_agregadas.csv"
+    arcos_path: str = "/mnt/e/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_arcos.csv"
+    raw_flow_path: str = "/mnt/e/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"
+    out_dir: str = "/mnt/e/work/lab/project/sim-binary-shapes-2d/processed_data/5_graficos_finales"
 
-    system_style: Dict[str, Tuple[str, str]] = field(default_factory=lambda: {
-        'Disco(G)-Disco(C)': ('#000000', 'o'),
-        'Disco(G)-Tri(C)':   ('#E69F00', '^'),
-        'Disco(G)-Cuad(C)':  ('#D55E00', 's'),
-        'Disco(G)-Pent(C)':  ('#CC79A7', 'p'),
-        'Tri(G)-Disco(C)':   ('#009E73', '^'),
-        'Cuad(G)-Disco(C)':  ('#56B4E9', 's'),
-        'Pent(G)-Disco(C)':  ('#0072B2', 'p'),
-    })
-
-    english_labels: Dict[str, str] = field(default_factory=lambda: {
-        'Disco(G)-Disco(C)': 'Disk-Disk',
-        'Disco(G)-Tri(C)':   'Disk-Triangle',
-        'Disco(G)-Cuad(C)':  'Disk-Square',
-        'Disco(G)-Pent(C)':  'Disk-Pentagon',
-        'Tri(G)-Disco(C)':   'Triangle-Disk',
-        'Cuad(G)-Disco(C)':  'Square-Disk',
-        'Pent(G)-Disco(C)':  'Pentagon-Disk',
-    })
+    # Estilos: vienen de estilo_figuras.py (comun a todos los scripts)
+    system_style: Dict[str, Tuple[str, str]] = field(default_factory=lambda: dict(SYSTEM_STYLE))
+    english_labels: Dict[str, str] = field(default_factory=lambda: dict(ENGLISH_LABELS))
 
 CFG = AnalysisConfig()
 
@@ -45,35 +33,11 @@ CFG = AnalysisConfig()
 AR_COL = "area_ratio_nominal"
 RR_COL = "r_ratio_nominal"
 
-SYSTEM_NAME_MAP = {
-    'Disco-Disco': 'Disco(G)-Disco(C)',
-    'Disco-Tri':   'Disco(G)-Tri(C)',
-    'Disco-Cuad':  'Disco(G)-Cuad(C)',
-    'Disco-Pent':  'Disco(G)-Pent(C)',
-    'Tri-Disco':   'Tri(G)-Disco(C)',
-    'Cuad-Disco':  'Cuad(G)-Disco(C)',
-    'Pent-Disco':  'Pent(G)-Disco(C)',
-    'Disco':       'Disco(G)',
-    'Tri':         'Tri(G)',
-    'Cuad':        'Cuad(G)',
-    'Pent':        'Pent(G)',
-}
+# SYSTEM_NAME_MAP viene de estilo_figuras.py
 
 # =============================================================================
 # HELPERS
 # =============================================================================
-
-def set_plot_fonts(labels: int = 20, ticks: int = 16, legend: int = 14):
-    plt.rcParams.update({
-        'axes.labelsize': labels,
-        'xtick.labelsize': ticks,
-        'ytick.labelsize': ticks,
-        'legend.fontsize': legend,
-        'text.usetex': False,
-        'mathtext.fontset': 'stix',
-        'font.family': 'STIXGeneral',
-    })
-
 
 def save_plot(filename: str):
     os.makedirs(CFG.out_dir, exist_ok=True)
@@ -186,7 +150,7 @@ def plot_puros_vs_orificio(df: pd.DataFrame):
     plt.figure()
     plt.errorbar(
         df_puros['D_d_sq'], df_puros['log_S'], yerr=df_puros['log_S_err'],
-        fmt='o-', color='black', capsize=4, label='Pure Disks'
+        fmt='o-', color='black', label='Pure Disks', **ERRORBAR_KW
     )
     plt.xlabel(r"Orifice Ratio $(D/d)^2$")
     plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
@@ -208,11 +172,10 @@ def plot_disco_vs_area_ratio(df: pd.DataFrame):
 
     val_ref, _ = get_pure_ref(df, 'Disco(G)-Disco(C)', main_dd, 'log_S')
     if val_ref is not None:
-        plt.axhline(y=val_ref, color='black', linestyle='--', label=r'$\chi = 0$ (Pure)', zorder=1)
+        plt.axhline(y=val_ref, **REF_LINE_KW, label=r'$\chi = 0$ (Pure)')
 
     target_chis = [0.01, 0.1, 0.14, 0.2]
-    colors = plt.cm.inferno(np.linspace(0.1, 0.7, len(target_chis)))
-    markers = ['o', 's', '^', 'd']
+    colors, markers = SEQ_STYLE(len(target_chis))
 
     for chi, color, marker in zip(target_chis, colors, markers):
         grp = df_sys[np.isclose(df_sys['chi'], chi, atol=0.005)].sort_values(AR_COL)
@@ -229,20 +192,13 @@ def plot_disco_vs_area_ratio(df: pd.DataFrame):
         plt.errorbar(
             plot_data[AR_COL], plot_data['log_S'], yerr=plot_data['log_S_err'],
             fmt=f'{marker}-', color=color, label=rf'$\chi = {chi}$',
-            capsize=4, markersize=8, linewidth=1.5,
+            **ERRORBAR_KW,
         )
 
-    plt.xlabel(r"Relación de áreas nominal $R_a$")
+    plt.xlabel(r"Nominal Area Ratio $R_a$")
     plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
 
-    plt.legend(
-        loc='best',
-        prop={'size': 28},
-        frameon=True,
-        handlelength=2.0,
-        borderpad=0.6,
-        labelspacing=0.5
-    )
+    plt.legend(loc='best')
 
     save_plot("2-discog-discoc-vs-area-ratio")
 
@@ -366,8 +322,11 @@ def plot_sweeps_by_system(
         system_id = system_name.lower().replace('(', '').replace(')', '').replace('_', '-').replace(' ', '-')
 
         plt.figure()
-        for chosen, x, y, err in datos_por_sistema[system_name]:
-            plt.errorbar(x, y, yerr=err, fmt='s-', label=rf"AR = {chosen:.3g}", capsize=3)
+        curvas = datos_por_sistema[system_name]
+        colors, markers = SEQ_STYLE(len(curvas))
+        for (chosen, x, y, err), color, marker in zip(curvas, colors, markers):
+            plt.errorbar(x, y, yerr=err, fmt=f'{marker}-', color=color,
+                         label=rf"$R_a = {chosen:.3g}$", **ERRORBAR_KW)
 
         plt.xlabel(r"Concentration $\chi$")
         plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
@@ -422,7 +381,7 @@ def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15):
                 [0.0] + grp_sis['chi'].tolist(),
                 [np.log(2.0)] + grp_sis['log_S_norm'].tolist(),
                 yerr=[0.0] + grp_sis['log_S_norm_err'].tolist(),
-                fmt=f'{marker}-', color=color, label=label_en, capsize=4,
+                fmt=f'{marker}-', color=color, label=label_en, **ERRORBAR_KW,
             )
 
         plt.xlabel(r"Concentration $\chi$")
@@ -462,7 +421,7 @@ def plot_geometric_effects_raw(df: pd.DataFrame, target_ar: float = 0.15):
             [0.0] + grp_sis['chi'].tolist(),
             [p0] + grp_sis['log_S'].tolist(),
             yerr=[e0] + grp_sis['log_S_err'].tolist(),
-            fmt=f'{marker}-', color=color, label=label_en, capsize=4,
+            fmt=f'{marker}-', color=color, label=label_en, **ERRORBAR_KW,
         )
 
     plt.xlabel(r"Concentration $\chi$")
@@ -500,12 +459,12 @@ def plot_geometric_effects_linear(df: pd.DataFrame, target_ar: float = 0.15):
                 [0.0] + grp_sis['chi'].tolist(),
                 [p0] + grp_sis['S_mean'].tolist(),
                 yerr=[e0] + grp_sis['S_sem'].tolist(),
-                fmt=f'{marker}-', color=color, label=label_en, capsize=4,
+                fmt=f'{marker}-', color=color, label=label_en, **ERRORBAR_KW,
             )
 
         plt.xlabel(r"Concentration $\chi$")
         plt.ylabel(r"Mean Size $\langle S \rangle$")
-        plt.legend(fontsize='large', loc='upper left')
+        plt.legend(loc='upper left')
         save_plot(filename)
 
     draw_lin(['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)', 'Disco(G)-Tri(C)'], "11a-additive-linear")
@@ -548,18 +507,18 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
         plt.errorbar(
             grp['chi'], grp['mean'], yerr=grp['sem'],
             fmt=f'{marker}-', color=color,
-            label=CFG.english_labels.get(sys_name, sys_name), capsize=4,
+            label=CFG.english_labels.get(sys_name, sys_name), **ERRORBAR_KW,
         )
 
     # Ajustar la línea de referencia homogénea para que vaya de 0 a 0.4
-    plt.plot([0, 0.5], [0, 0.5], 'k--', alpha=0.5, label='Homogeneous')
+    plt.plot([0, 0.5], [0, 0.5], **REF_LINE_KW, label='Homogeneous')
     
     # Opcional: fijar explícitamente los límites del eje x
     plt.xlim(0, 0.45)
     
     plt.xlabel(r"Global Concentration $\chi$")
     plt.ylabel(r"Arch Additive Fraction $\chi_{arch}$")
-    plt.legend(loc='upper left', fontsize='large')
+    plt.legend(loc='upper left')
     save_plot("6-arch-composition")
 
     # --- Filtro chi = 0.2 ---
@@ -581,7 +540,7 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
     )
     ax.set_xticks(range(len(present)))
     ax.set_xticklabels(new_ticks, rotation=15)
-    plt.title(rf"Arch Tortuosity ($\chi = {target_chi}$)")
+    anotar_chi(ax, target_chi)
     plt.xlabel(None)
     plt.ylabel("Tortuosity")
     save_plot(f"9-arch-tortuosity-chi-{target_chi}")
@@ -604,10 +563,10 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
             )
             ax_box.set_xticks(range(len(present)))
             ax_box.set_xticklabels(new_ticks, rotation=15)
-            plt.title(rf"Avalanche Size ($\chi = {target_chi}$)")
+            anotar_chi(ax_box, target_chi)
             plt.xlabel(None)
             plt.yscale('log')
-            plt.ylabel("Avalanche Size (S)")
+            plt.ylabel(r"Avalanche Size $S$")
             save_plot(f"10-avalanche-boxplot-chi-{target_chi}")
 
 
@@ -643,7 +602,7 @@ def plot_arch_geometry_deep_dive(df_stats: pd.DataFrame):
         )
     plt.xlabel("Orifice Span ($L$)")
     plt.ylabel("Arch Length ($s$)")
-    plt.legend(loc='upper left', fontsize='small')
+    plt.legend(loc='upper left')
     save_plot(f"12-arch-length-vs-span-chi-{target_chi}")
 
     # --- Plot 13: Relación de aspecto ---
@@ -654,7 +613,9 @@ def plot_arch_geometry_deep_dive(df_stats: pd.DataFrame):
     )
     ax.set_xticks(range(len(present)))
     ax.set_xticklabels(new_ticks, rotation=15)
+    plt.xlabel(None)
     plt.ylabel("Arch Aspect Ratio ($H/L$)")
+    anotar_chi(ax, target_chi)
     save_plot(f"13-arch-aspect-ratio-chi-{target_chi}")
 
     # --- Plot 14: Altura ---
@@ -665,7 +626,9 @@ def plot_arch_geometry_deep_dive(df_stats: pd.DataFrame):
     )
     ax.set_xticks(range(len(present)))
     ax.set_xticklabels(new_ticks, rotation=15)
+    plt.xlabel(None)
     plt.ylabel("Arch Height ($H$)")
+    anotar_chi(ax, target_chi)
     save_plot(f"14-arch-height-boxplot-chi-{target_chi}")
 
 
@@ -710,7 +673,7 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
             plt.errorbar(
                 summary['chi'], summary['mean'], yerr=summary['sem'],
                 fmt=f'{marker}-', color=color,
-                label=CFG.english_labels.get(sys_name, sys_name), capsize=4,
+                label=CFG.english_labels.get(sys_name, sys_name), **ERRORBAR_KW,
             )
 
         # Fijar explícitamente los límites del eje x de 0 a 0.4
@@ -718,7 +681,7 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
         
         plt.xlabel(r"Concentration $\chi$")
         plt.ylabel(ylabel)
-        plt.legend(loc='best', fontsize='small')
+        plt.legend(loc='best')
         save_plot(f"15-evolution-{metric.lower()}")
 
 # =============================================================================
@@ -728,10 +691,7 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
 def main():
     print("[+] Starting integrated PDF pipeline...")
 
-    set_plot_fonts()
-    if os.path.exists("figs.mplstyle"):
-        plt.style.use('figs.mplstyle')
-        plt.rcParams['text.usetex'] = False
+    aplicar_estilo(verbose=True)
 
     os.makedirs(CFG.out_dir, exist_ok=True)
 

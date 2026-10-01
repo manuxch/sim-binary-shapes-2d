@@ -7,8 +7,8 @@ en punteada), a partir de resumen_presion_por_atasco.csv (el crudo por
 atasco, no el ya agregado por configuracion). Dos magnitudes, en figuras
 separadas:
 
-  - Presion media reducida  <P>/g    -> <out>_<Forma>.png
-  - Esfuerzo de corte medio <tau>/g  -> <out>_tau_<Forma>.png
+  - Presion media reducida  <P>/g    -> <out>_<Forma>.pdf
+  - Esfuerzo de corte medio <tau>/g  -> <out>_tau_<Forma>.pdf
     (tau = radio del circulo de Mohr del tensor de cada particula, la
     parte deviatorica; promedio pesado por area, igual que P)
 
@@ -45,33 +45,32 @@ cortada no aparece duplicado.
 
 Uso:
     python3 comparar_presion_por_chi.py --csv resumen_presion_por_atasco.csv \\
-        --out comparacion_chi.png
-    # -> comparacion_chi_<Forma>.png (presion) y comparacion_chi_tau_<Forma>.png (corte)
+        --out comparacion_chi.pdf
+    # -> comparacion_chi_<Forma>.pdf (presion) y comparacion_chi_tau_<Forma>.pdf (corte)
 
     # Solo una magnitud, otra razon de areas, otras formas u otro rango de chi:
     python3 comparar_presion_por_chi.py --csv resumen_presion_por_atasco.csv \\
-        --magnitud tau --ratio 0.3 --formas Disco Cuadrado --chi_max 0.4 --out comparacion_chi.png
+        --magnitud tau --ratio 0.3 --formas Disco Cuadrado --chi_max 0.4 --out comparacion_chi.pdf
 """
 import argparse
 import os
 import re
 import numpy as np
 import pandas as pd
+import sys
 import matplotlib.pyplot as plt
 
-plt.rcParams['font.family'] = 'STIXGeneral'
-plt.rcParams['mathtext.fontset'] = 'stix'
+# Estilo comun (estilo_figuras.py, base: graficos_finales.py / 5b-matrix-normalized)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from estilo_figuras import (aplicar_estilo, estilo_forma, guardar_figura,
+                            REGION_STYLE, ERRORBAR_KW)
 
-# Vermillion para arco, azul para roi (paleta Wong, colorblind-safe) --
-# mismo rojo que ya se usa para marcar el arco en graficar_presion_atasco.py
-COLOR_ARCO = '#D55E00'
-COLOR_ROI = '#0072B2'
 REGIONES = ('arco', 'roi')
 
 # magnitud -> (prefijo de las columnas del csv, etiqueta del eje y, sufijo del archivo)
 MAGNITUDES = {
-    'P':   ('SumP_reducida',   r'Presión media reducida $\langle P\rangle / g$', ''),
-    'tau': ('SumTau_reducida', r'Esfuerzo de corte medio reducido $\langle \tau\rangle / g$', '_tau'),
+    'P':   ('SumP_reducida',   r'Reduced Mean Pressure $\langle P\rangle / g$', ''),
+    'tau': ('SumTau_reducida', r'Reduced Mean Shear Stress $\langle \tau\rangle / g$', '_tau'),
 }
 
 RATIO_REGEX = re.compile(r'Ratio_([0-9]+p[0-9]+)')
@@ -194,43 +193,52 @@ def limites_y(df_agg, formas, mags, error, regiones=REGIONES, margen=0.05):
 def graficar_una_forma(df_agg, forma, mag, etiqueta_chi, error='std', desplazar=0.0,
                        ylim=None, regiones=REGIONES):
     """Una sola figura, para una sola forma de grano grande y una magnitud:
-    arco vs roi, grandes vs chicas, en funcion de chi, con barras de error."""
-    colores = {regiones[0]: COLOR_ARCO, regiones[1]: COLOR_ROI}
+    arco vs roi, grandes vs chicas, en funcion de chi, con barras de error.
+
+    Estilo de 5b-matrix-normalized: tamaño de figura por defecto, marcador +
+    linea, capsize=4, leyenda adentro, sin titulo (la forma va como titulo de
+    la leyenda, igual que en temporal_chi.py).
+    Color = region (arco vermillion, roi azul). Grandes: marcador de la forma
+    del grano, linea solida. Chicas (siempre discos): circulo vacio, linea
+    discontinua."""
     sub = df_agg[df_agg['forma_grande'] == forma].sort_values('chi')
     chi = sub['chi'].to_numpy(dtype=float)
     paso = desplazar * (np.nanmax(chi) - np.nanmin(chi) if len(chi) > 1 else 1.0)
+    label_forma, marker_forma = estilo_forma(forma)
 
-    fig, ax = plt.subplots(figsize=(6.5, 5))
+    fig, ax = plt.subplots()
     series = [(region, t) for region in regiones for t in ('B', 'S')]
     for k, (region, t) in enumerate(series):
-        color = colores[region]
+        color, label_region = REGION_STYLE[region]
         clave = f'{mag}_{region}_{t}'
         y = sub[f'mean_{clave}'].to_numpy(dtype=float)
         yerr = None if error == 'ninguno' else sub[f'{error}_{clave}'].to_numpy(dtype=float)
         # desplazamiento horizontal opcional, para que las barras no se tapen
         dx = (k - (len(series) - 1) / 2) * paso
+        if t == 'B':
+            estilo = dict(fmt=f'{marker_forma}-', color=color)
+            label = f'{label_region}, large'
+        else:
+            estilo = dict(fmt='o--', color=color, markerfacecolor='white')
+            label = f'{label_region}, small'
         # Las chicas no existen en chi=0 (Area=0 -> NaN); matplotlib corta
         # la linea ahi solo, no hace falta filtrar a mano.
-        ax.errorbar(chi + dx, y, yerr=yerr, color=color,
-                    linestyle='-' if t == 'B' else '--',
-                    marker='o' if t == 'B' else 's', markersize=4,
-                    capsize=2.5, elinewidth=0.8, capthick=0.8,
-                    label=f'{region} — {"grandes" if t == "B" else "chicas"}')
+        ax.errorbar(chi + dx, y, yerr=yerr, label=label, **estilo, **ERRORBAR_KW)
 
     if ylim is not None:
         ax.set_ylim(*ylim)
-    ax.set_title(forma)
     ax.set_xlabel(etiqueta_chi)
     ax.set_ylabel(MAGNITUDES[mag][1])
-    ax.legend(loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=9)
-    fig.tight_layout()
+    ax.legend(title=label_forma, loc='best')
     return fig
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--csv', required=True, help='resumen_presion_por_atasco.csv')
-    parser.add_argument('--out', default='comparacion_chi.png')
+    parser.add_argument('--out', default='comparacion_chi.pdf',
+                        help='nombre base; la extension define el formato (default pdf, '
+                             'como graficos_finales.py)')
     parser.add_argument('--magnitud', choices=['P', 'tau', 'ambas'], default='ambas',
                         help="P (presion), tau (esfuerzo de corte) o ambas (default), "
                              "cada una en su propia figura")
@@ -255,9 +263,10 @@ def main():
                         help='fuerza el eje y de las figuras de presion')
     parser.add_argument('--ylim_tau', type=float, nargs=2, default=None, metavar=('YMIN', 'YMAX'),
                         help='fuerza el eje y de las figuras de corte')
-    parser.add_argument('--etiqueta_chi', default=r'$\chi$ (fracción de área de chicas)',
+    parser.add_argument('--etiqueta_chi', default=r'Concentration $\chi$',
                         help='Texto del eje x')
     args = parser.parse_args()
+    aplicar_estilo(verbose=True)
 
     magnitudes = ['P', 'tau'] if args.magnitud == 'ambas' else [args.magnitud]
 
@@ -318,8 +327,7 @@ def main():
                                      error=args.error, desplazar=args.desplazar,
                                      ylim=ylims.get(mag))
             out_path = f"{base}{sufijo}_{forma}{ext}"
-            fig.savefig(out_path, dpi=200, bbox_inches='tight')
-            plt.close(fig)
+            guardar_figura(out_path, fig)
             print(f"Guardado: {out_path}")
 
 
