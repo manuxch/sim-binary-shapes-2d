@@ -8,7 +8,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 import os as _os, sys as _sys
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))  # estilo_figuras.py vive en analysis/
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))  # estilo_figuras.py y rutas.py viven en analysis/
+import rutas
 from estilo_figuras import (SYSTEM_STYLE, ENGLISH_LABELS, SYSTEM_NAME_MAP,
                             set_plot_fonts, aplicar_estilo, ERRORBAR_KW,
                             REF_LINE_KW, SEQ_STYLE, anotar_chi)
@@ -20,10 +21,10 @@ from estilo_figuras import (SYSTEM_STYLE, ENGLISH_LABELS, SYSTEM_NAME_MAP,
 @dataclass
 class AnalysisConfig:
     """Rutas y estilos comunes para todas las figuras."""
-    data_path: str = "/mnt/e/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/estadisticas_flujo_agregadas.csv"
-    arcos_path: str = "/mnt/e/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_arcos.csv"
-    raw_flow_path: str = "/mnt/e/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"
-    out_dir: str = "/mnt/e/work/lab/project/sim-binary-shapes-2d/processed_data/5_graficos_finales"
+    data_path: str = os.path.join(rutas.AVALANCHE_DIR, "estadisticas_flujo_agregadas.csv")
+    arcos_path: str = os.path.join(rutas.AVALANCHE_DIR, "resultados_completos_arcos.csv")
+    raw_flow_path: str = os.path.join(rutas.AVALANCHE_DIR, "resultados_completos_esqueleto.csv")
+    out_dir: str = rutas.GRAFICOS_FINALES_DIR
 
     # Estilos: vienen de estilo_figuras.py (comun a todos los scripts)
     system_style: Dict[str, Tuple[str, str]] = field(default_factory=lambda: dict(SYSTEM_STYLE))

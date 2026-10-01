@@ -49,6 +49,9 @@ def correr(cmd, log):
     if proc.returncode != 0:
         raise SystemExit(f"Fallo (codigo {proc.returncode}): {' '.join(cmd)}")
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))  # rutas.py vive en analysis/
+import rutas
 
 def escala_frames(datos, formas, col, pct):
     p_min, p_max = [], []
@@ -65,9 +68,9 @@ def escala_frames(datos, formas, col, pct):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--datos', default='/home/juli/resultados_tensor_v2',
+    ap.add_argument('--datos', default=os.path.join(rutas.PRESION_DIR, 'por_forma'),
                     help='carpeta con presion_por_particula_<Forma>.parquet')
-    ap.add_argument('--salida', default='/home/juli/mapas',
+    ap.add_argument('--salida', default=rutas.MAPAS_CALOR_DIR,
                     help='carpeta donde quedan frames y mapas')
     ap.add_argument('--formas', nargs='+', default=['Disco', 'Triangulo', 'Cuadrado', 'Pentagono'])
     ap.add_argument('--magnitudes', nargs='+', default=['P_reducida', 'tau_reducida'])

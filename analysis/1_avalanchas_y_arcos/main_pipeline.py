@@ -3,6 +3,9 @@ import shutil
 import multiprocessing
 import pandas as pd
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))  # rutas.py vive en analysis/
+import rutas
 import indexer
 import processor
 import flow_analysis
@@ -20,7 +23,7 @@ def main():
 
     # 1. INDEXACIÓN
     indexer.main()
-    idx_path = "/home/juli/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
+    idx_path = rutas.MASTER_INDEX
     if not os.path.exists(idx_path):
         print("[-] Error: No se pudo generar el índice. Abortando.")
         return

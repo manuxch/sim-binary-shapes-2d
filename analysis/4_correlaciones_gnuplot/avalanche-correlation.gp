@@ -1,3 +1,6 @@
+# Raiz del repo (correr gnuplot desde cualquier carpeta dentro del repo)
+REPO = system("git rev-parse --show-toplevel")
+
 set terminal qt size 700,700 font "Arial,11"
 set datafile separator ","
 set title "Mapa de Retorno: Correlación de Tamaños de Avalanchas Consecutivas"
@@ -13,7 +16,7 @@ set size square
 
 # Filtrar para una simulación específica
 target_hash = "85bba77841e4"
-cmd_esqueleto = sprintf("< grep '%s' /home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv", target_hash)
+cmd_esqueleto = sprintf("< grep '%s' ".REPO."/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv", target_hash)
 
 # Inicializar la variable que guardará el estado de la fila anterior
 old = NaN

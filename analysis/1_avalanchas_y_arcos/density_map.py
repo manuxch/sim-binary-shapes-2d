@@ -7,7 +7,10 @@ import matplotlib
 matplotlib.use('Agg')
 
 # --- CONFIGURACIÓN ---
-POSTPRO_DIR = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/2_spatial_maps"
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))  # rutas.py vive en analysis/
+import rutas
+POSTPRO_DIR = rutas.SPATIAL_MAPS_DIR
 
 def plot_segregation_analysis(npz_path, chi_global=0.1, output_folder=POSTPRO_DIR):
     """

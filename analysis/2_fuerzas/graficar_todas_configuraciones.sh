@@ -5,7 +5,7 @@
 # Analogo a graficar_todas_configuraciones.sh de forces_old/ (ahora en viejo/), adaptado al
 # nuevo script/columnas.
 
-CONTENEDOR="/home/juli/work/lab/containers/workstation_full.sif"
+CONTENEDOR="${CONTENEDOR:-/home/juli/work/lab/containers/workstation_full.sif}"  # se puede cambiar con: export CONTENEDOR=/ruta/al.sif
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$DIR/../.." && pwd)"
 ARCHIVO_CSV="$REPO_DIR/processed_data/fuerzas/datos_v4/resumen_fuerza_normal_por_configuracion.csv"

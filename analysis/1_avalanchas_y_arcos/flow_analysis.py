@@ -3,9 +3,12 @@ import numpy as np
 import os
 import json
 
-IDX_PATH = "/home/juli/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
-AV_PATH = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_esqueleto.csv"
-OUT_DIR = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data"
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))  # rutas.py vive en analysis/
+import rutas
+IDX_PATH = rutas.MASTER_INDEX
+AV_PATH = os.path.join(rutas.AVALANCHE_DIR, "resultados_completos_esqueleto.csv")
+OUT_DIR = rutas.AVALANCHE_DIR
 
 
 def get_detailed_system_name(row):

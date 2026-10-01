@@ -252,7 +252,10 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id):
     print(f"✅ Imagen guardada con éxito en:\n   {output_path}")
 
 if __name__ == "__main__":
-    CARPETA_SIMULACION = "/home/juli/work/lab/project/sim-binary-shapes-2d/datos_simulaciones/simulation_data/R_2.0/BARRIDO_WIDTHS_DISK_DISK/Chi_0p0_W_2p0" 
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # rutas.py vive en analysis/
+    import rutas
+    CARPETA_SIMULACION = os.path.join(rutas.SIM_DATA_DIR, "BARRIDO_WIDTHS_DISK_DISK", "Chi_0p0_W_2p0")
     ID_DEL_ATASCO = "00095" 
     
     graficar_arco_y_fuerzas(CARPETA_SIMULACION, ID_DEL_ATASCO)

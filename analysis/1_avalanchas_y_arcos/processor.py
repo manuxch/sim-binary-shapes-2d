@@ -13,8 +13,11 @@ GRID_NX, GRID_NY = 50, 150
 TIME_STEP = 0.001
 
 PREPRO_DIR = "0_mapa_prepro"
-DATA_DIR = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data"
-IDX_PATH = "/home/juli/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))  # rutas.py vive en analysis/
+import rutas
+DATA_DIR = rutas.AVALANCHE_DIR
+IDX_PATH = rutas.MASTER_INDEX
 
 
 def get_target_info(sim_row):

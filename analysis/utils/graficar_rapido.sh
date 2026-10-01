@@ -48,14 +48,14 @@ fi
 echo "✅ Datos filtrados ($((LINEAS - 1)) partículas). Generando gráfico..."
 
 
-CONTENEDOR="/home/juli/work/lab/containers/workstation_full.sif"
+CONTENEDOR="${CONTENEDOR:-/home/juli/work/lab/containers/workstation_full.sif}"  # se puede cambiar con: export CONTENEDOR=/ruta/al.sif
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 
 
 
 # 4. Ejecutar el script original sobre el CSV temporal que pesa solo unos kilobytes.
-apptainer exec "$CONTENEDOR" python3 "$DIR/grafico_tension_silo.py"     --csv "$TEMP_CSV"     --sim_path "$SIM_PATH"     --jam_id "$JAM_ID"     --out "$OUT"
+apptainer exec "$CONTENEDOR" python3 "$DIR/../3_presion_y_mapas/graficar_presion_atasco.py"     --csv "$TEMP_CSV"     --sim_path "$SIM_PATH"     --jam_id "$JAM_ID"     --out "$OUT"
 
 # 5. Limpiar el entorno eliminando el temporal
 rm -f "$TEMP_CSV"

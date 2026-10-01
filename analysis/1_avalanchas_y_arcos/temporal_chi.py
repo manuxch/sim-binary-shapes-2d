@@ -18,7 +18,8 @@ import matplotlib.pyplot as plt
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import os as _os, sys as _sys
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))  # estilo_figuras.py vive en analysis/
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))  # estilo_figuras.py y rutas.py viven en analysis/
+import rutas
 from estilo_figuras import aplicar_estilo, estilo_sistema, REF_LINE_KW
 
 # a nivel de modulo, asi los procesos del Pool tambien lo tienen
@@ -27,7 +28,7 @@ aplicar_estilo()
 # =============================================================================
 # CONFIGURACIÓN (valores por defecto; se cambian por argumentos)
 # =============================================================================
-INDEX_FILE = "/home/juli/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
+INDEX_FILE = rutas.MASTER_INDEX
 WINDOW_SIZE = 10.0   # tamaño del batch en segundos
 CPU_CORES = cpu_count()
 FORMATO = 'pdf'      # igual que save_plot() de graficos_finales.py

@@ -62,8 +62,15 @@ Cada carpeta de `analysis/` y `processed_data/` puede tener un `viejo.tar.gz` co
 
 Los scripts dentro de una misma carpeta de `analysis/` se importan entre sí: hay que mantenerlos juntos.
 
+## Rutas
+
+Todas las rutas salen de `analysis/rutas.py`, que las calcula a partir de dónde está clonado el repo: los scripts funcionan igual en `/home/juli/work/...`, en `/mnt/e/work/...` (WSL) o en el cluster.
+
+- **Datos crudos fuera del repo:** `export SIM_DATA_DIR=/ruta/a/simulation_data/R_2.0` antes de correr el paso 1.
+- **Otro contenedor de Apptainer** (scripts `.sh`): `export CONTENEDOR=/ruta/al/contenedor.sif`.
+- **gnuplot** (`analysis/4_correlaciones_gnuplot/`): correrlo desde cualquier carpeta dentro del repo; la raíz la toma de `git rev-parse --show-toplevel`.
+
 ## Notas
 
-- Varios scripts del paso 1 usan rutas absolutas a `/home/juli/work/lab/project/sim-binary-shapes-2d/...`.
 - `migrar_datos_locales.sh`: correrlo una vez después del pull de la reorganización para recuperar los archivos pesados y acomodar los datos locales.
 - `AUDITORIA_REORGANIZACION.md`: detalle de qué se movió, a dónde y por qué.

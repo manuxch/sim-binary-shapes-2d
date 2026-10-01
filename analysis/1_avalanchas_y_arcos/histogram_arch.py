@@ -7,8 +7,11 @@ import matplotlib
 
 matplotlib.use('Agg')
 
-MEGA_DATASET_PATH = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/1_avalanche_data/resultados_completos_arcos.csv"
-OUTPUT_DIR = "/home/juli/work/lab/project/sim-binary-shapes-2d/processed_data/4_arch_histograms"
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))  # rutas.py vive en analysis/
+import rutas
+MEGA_DATASET_PATH = os.path.join(rutas.AVALANCHE_DIR, "resultados_completos_arcos.csv")
+OUTPUT_DIR = rutas.ARCH_HIST_DIR
 
 
 def ensure_nominal_columns(df):

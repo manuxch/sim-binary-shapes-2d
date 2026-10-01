@@ -6,8 +6,11 @@ import re
 import numpy as np
 
 # --- CONFIGURACIÓN ---
-ROOT_DIR = "/home/juli/work/lab/project/sim-binary-shapes-2d/datos_simulaciones/simulation_data/R_2.0"
-OUTPUT_CSV = "/home/juli/work/lab/project/sim-binary-shapes-2d/master_sim_index.csv"
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))  # rutas.py vive en analysis/
+import rutas
+ROOT_DIR = rutas.SIM_DATA_DIR
+OUTPUT_CSV = rutas.MASTER_INDEX
 
 
 def path_val_to_float(val_str):
