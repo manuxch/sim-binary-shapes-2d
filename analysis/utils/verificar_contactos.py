@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Diagnostico de los archivos atasco_contacts_*.dat: verifica, con el
-equilibrio estatico de cada grano, la convencion de signo de la fuerza
-tangencial y si las columnas son impulsos (hay que dividir por dt) o
-fuerzas.
+Diagnostico de los archivos atasco_contacts_*.dat y del tensor de
+esfuerzos que calcula presion_tensor_arch.py, usando el equilibrio
+estatico de cada grano en el atasco.
 
-En un atasco (estatico) la suma de fuerzas de contacto sobre cada grano
-equilibra su peso: sum_c F_c = (0, m g). Para cada grano que NO toca
-paredes ni piso se calcula el residuo |sum F - (0, m g)| / (m g) bajo
-varias hipotesis; la correcta es la que da residuo ~0.
+Usa las MISMAS funciones que presion_tensor_arch.py (fuerzas_contacto,
+normales_contacto, parse_paredes), asi que lo que se verifica aca es lo que
+efectivamente se calcula.
 
-Hipotesis (F sobre el grano A del contacto; n = normal de A hacia B,
-t = (-n_y, n_x), igual que presion_tensor_arch.py):
-  codigo_actual        F_A = (-fn n + ft t) / dt     <- presion_tensor_arch.py (convencion de Box2D, tangente = (n_y, -n_x))
-  signo_anterior       F_A = (-fn n - ft t) / dt     <- version anterior del script (signo tangencial invertido)
-  sin_tangencial       F_A = (-fn n) / dt
-  (y las mismas tres sin dividir por dt, por si el archivo ya trae fuerzas)
+1) Signo de la tangencial e impulso/fuerza: para cada grano, la suma de
+   fuerzas de contacto equilibra su peso, sum_c F_c = (0, m g). Se calcula
+   el residuo |sum F - (0, m g)| / (m g) bajo varias hipotesis; la correcta
+   es la que da ~0.
+     codigo_actual   F_A = (-fn n + ft t) / dt   (convencion de Box2D)
+     signo_anterior  F_A = (-fn n - ft t) / dt   (version vieja del script)
+     sin_tangencial  F_A = (-fn n) / dt
+     ..._sin_/dt     lo mismo sin dividir por dt (por si el archivo trae fuerzas)
+
+2) Normal del contacto y simetria del tensor, por tipo de grano: el
+   torque neto sum(r_x F_y - r_y F_x) = S01 - S10 tiene que ser ~0, o sea el
+   tensor de cada grano tiene que ser simetrico. Se compara la normal
+   'nueva' (exacta con discos; cara de referencia entre poligonos y contra
+   paredes) con la 'vieja' (lado mas cercano del poligono A).
+   Ademas: P > 0 (compresion) y la relacion tau/P.
 
 Uso:
-    python3 analysis/utils/verificar_contactos.py --sim_path /ruta/a/Chi_0p0_W_2p0 --jam_id 1
-    python3 analysis/utils/verificar_contactos.py --sim_path ... --jam_id 1 2 3 4 5
+    python3 analysis/utils/verificar_contactos.py --sim_path /ruta/a/Chi_0p0_W_2p0 --jam_id 1 2 3 4 5
 """
 import argparse
 import glob
@@ -31,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "3_presion_y_mapas"))
-from presion_tensor_arch import parse_xy, normales_poligonos  # noqa: E402
+from presion_tensor_arch import parse_xy, parse_paredes, fuerzas_contacto  # noqa: E402
 
 
 def leer_params(sim_path):
@@ -60,99 +66,91 @@ def buscar_archivos(sim_path, jam_id):
     return xy[0], ct[0]
 
 
-def diagnosticar(xy_file, ct_file, dens, dt, g):
-    p = pd.DataFrame.from_dict(parse_xy(xy_file), orient='index')
-    c = pd.read_csv(ct_file, sep=r'\s+', comment='#', header=None,
-                    names=['id_a', 'id_b', 'px', 'py', 'f_norm', 'f_tan'], usecols=range(6))
+def sumas_por_grano(df, ids):
+    """Suma por grano de F y de S_ij = r_i F_j (sobre A: F_A; sobre B: -F_A)."""
+    a_ok, b_ok = df['a_valida'].to_numpy(), df['b_valida'].to_numpy()
+    Fx, Fy = df['Fx_A'].to_numpy(), df['Fy_A'].to_numpy()
+    rax, ray = (df['px'] - df['pos_x_A']).to_numpy(), (df['py'] - df['pos_y_A']).to_numpy()
+    rbx, rby = (df['px'] - df['pos_x_B']).to_numpy(), (df['py'] - df['pos_y_B']).to_numpy()
+    ia, ib = df['id_a'].to_numpy(), df['id_b'].to_numpy()
+    out = {}
+    for k, (va, vb) in {'Fx': (Fx, -Fx), 'Fy': (Fy, -Fy),
+                        'S00': (rax * Fx, -rbx * Fx), 'S11': (ray * Fy, -rby * Fy),
+                        'S01': (rax * Fy, -rbx * Fy), 'S10': (ray * Fx, -rby * Fx)}.items():
+        sa = pd.Series(np.where(a_ok, va, 0.0), index=ia).groupby(level=0).sum()
+        sb = pd.Series(np.where(b_ok, vb, 0.0), index=ib).groupby(level=0).sum()
+        out[k] = sa.add(sb, fill_value=0).reindex(ids).fillna(0).to_numpy()
+    return out
 
-    info = {
-        'contactos': len(c),
-        'f_tan_negativos_%': 100.0 * (c['f_tan'] < 0).mean(),
-        'f_norm_mediana': float(c['f_norm'].median()),
-        'peso_grano_mediano_mg': float(np.median([dens[int(t)] * a * g for t, a in zip(p['type'], p['area'])])),
-    }
 
-    # Solo contactos grano-grano; granos que tocan pared/piso quedan fuera
-    toca_pared = set(c.loc[c['id_a'] < 0, 'id_b']) | set(c.loc[c['id_b'] < 0, 'id_a'])
-    gg = c[(c['id_a'] >= 0) & (c['id_b'] >= 0) & c['id_a'].isin(p.index) & c['id_b'].isin(p.index)].copy()
-
-    # Normal de A hacia B (misma geometria que presion_tensor_arch.py)
-    pa = p.loc[gg['id_a']]
-    nx = np.zeros(len(gg))
-    ny = np.zeros(len(gg))
-    es_disco = (pa['shape'] == 'Disco').to_numpy()
-    dx = gg['px'].to_numpy() - pa['pos_x'].to_numpy()
-    dy = gg['py'].to_numpy() - pa['pos_y'].to_numpy()
-    nr = np.hypot(dx, dy)
-    nr[nr == 0] = 1.0
-    nx[es_disco], ny[es_disco] = (dx / nr)[es_disco], (dy / nr)[es_disco]
-    if (~es_disco).any():
-        sel = ~es_disco
-        nv = normales_poligonos(gg['px'].to_numpy()[sel], gg['py'].to_numpy()[sel],
-                                pa['pos_x'].to_numpy()[sel], pa['pos_y'].to_numpy()[sel],
-                                pa['coords'].to_numpy()[sel])
-        nx[sel], ny[sel] = nv[:, 0], nv[:, 1]
-    tx, ty = -ny, nx
-    fn = gg['f_norm'].to_numpy()
-    ft = gg['f_tan'].to_numpy()
-
-    candidatos = [i for i in p.index if i not in toca_pared]
-    peso = pd.Series({i: dens[int(p.at[i, 'type'])] * p.at[i, 'area'] * g for i in candidatos})
-    ncont = pd.concat([gg['id_a'], gg['id_b']]).value_counts()
-    candidatos = [i for i in candidatos if ncont.get(i, 0) >= 2]
-
-    hip = {
-        'codigo_actual': (+1.0, True), 'signo_anterior': (-1.0, True), 'sin_tangencial': (0.0, True),
-        'codigo_actual_sin_/dt': (+1.0, False), 'signo_anterior_sin_/dt': (-1.0, False), 'sin_tang_sin_/dt': (0.0, False),
-    }
-    res = {}
-    for nombre, (s, div) in hip.items():
-        esc = 1.0 / dt if div else 1.0
-        fax = (-fn * nx + s * ft * tx) * esc
-        fay = (-fn * ny + s * ft * ty) * esc
-        sx = pd.Series(fax, index=gg['id_a'].to_numpy()).groupby(level=0).sum().sub(
-            pd.Series(fax, index=gg['id_b'].to_numpy()).groupby(level=0).sum(), fill_value=0)
-        sy = pd.Series(fay, index=gg['id_a'].to_numpy()).groupby(level=0).sum().sub(
-            pd.Series(fay, index=gg['id_b'].to_numpy()).groupby(level=0).sum(), fill_value=0)
-        sx, sy = sx.reindex(candidatos).fillna(0), sy.reindex(candidatos).fillna(0)
-        w = peso.reindex(candidatos)
-        res[nombre] = float(np.median(np.hypot(sx, sy - w) / w))
-    info['granos_evaluados'] = len(candidatos)
-
-    # Simetria del tensor de cada grano: S01 - S10 = sum(r_x f_y - r_y f_x) es
-    # el torque neto, que en un atasco estatico tiene que ser ~0. Ademas:
-    # P > 0 (compresion) y la relacion tau/P.
-    pb = p.loc[gg['id_b']]
-    rax, ray = dx, dy
-    rbx = gg['px'].to_numpy() - pb['pos_x'].to_numpy()
-    rby = gg['py'].to_numpy() - pb['pos_y'].to_numpy()
-    tens = {}
-    for nombre, s in (('codigo_actual', +1.0), ('signo_anterior', -1.0)):
-        fax = (-fn * nx + s * ft * tx) / dt
-        fay = (-fn * ny + s * ft * ty) / dt
-        comp = {}
-        for k, (ra, rb, fa) in {'S00': (rax, rbx, fax), 'S11': (ray, rby, fay),
-                                'S01': (rax, rbx, fay), 'S10': (ray, rby, fax)}.items():
-            # sobre A: F_A ; sobre B: -F_A (3ra ley)
-            comp[k] = (pd.Series(ra * fa, index=gg['id_a'].to_numpy()).groupby(level=0).sum()
-                       .sub(pd.Series(rb * fa, index=gg['id_b'].to_numpy()).groupby(level=0).sum(),
-                            fill_value=0).reindex(candidatos).fillna(0).to_numpy())
-        S00, S11, S01, S10 = comp['S00'], comp['S11'], comp['S01'], comp['S10']
-        norma = np.sqrt(S00**2 + S11**2 + S01**2 + S10**2)
-        norma[norma == 0] = np.nan
-        area = p.loc[candidatos, 'area'].to_numpy(dtype=float)
-        P = -0.5 * (S00 + S11) / area
-        sxx, syy, sxy = -S00 / area, -S11 / area, -0.5 * (S01 + S10) / area
-        tau = np.sqrt((0.5 * (sxx - syy))**2 + sxy**2)
-        asim = np.abs(S01 - S10) / norma
-        tens[nombre] = {
-            'asim_mediana': float(np.nanmedian(asim)),
-            'asim_p90': float(np.nanpercentile(asim, 90)),
-            'P_negativa_%': 100.0 * float(np.mean(P < 0)),
-            'tau/P_mediana': float(np.nanmedian(tau / np.where(P > 0, P, np.nan))),
+def metricas(S, area, peso):
+    norma = np.sqrt(S['S00']**2 + S['S11']**2 + S['S01']**2 + S['S10']**2)
+    norma = np.where(norma > 0, norma, np.nan)
+    P = -0.5 * (S['S00'] + S['S11']) / area
+    sxx, syy, sxy = -S['S00'] / area, -S['S11'] / area, -0.5 * (S['S01'] + S['S10']) / area
+    tau = np.sqrt((0.5 * (sxx - syy))**2 + sxy**2)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        return {
+            'residuo': float(np.nanmedian(np.hypot(S['Fx'], S['Fy'] - peso) / peso)),
+            'asim_med': float(np.nanmedian(np.abs(S['S01'] - S['S10']) / norma)),
+            'asim_p90': float(np.nanpercentile(np.abs(S['S01'] - S['S10']) / norma, 90)),
+            'P<0_%': 100.0 * float(np.mean(P < 0)),
+            'tau/P': float(np.nanmedian(tau / np.where(P > 0, P, np.nan))),
             'tau>P_%': 100.0 * float(np.mean(tau > P)),
         }
-    return info, res, tens
+
+
+def diagnosticar(xy_file, ct_file, dens, dt, g):
+    p = pd.DataFrame.from_dict(parse_xy(xy_file), orient='index')
+    paredes = parse_paredes(xy_file)
+    c = pd.read_csv(ct_file, sep=r'\s+', comment='#', header=None,
+                    names=['id_a', 'id_b', 'px', 'py', 'f_norm', 'f_tan'], usecols=range(6))
+    info = {
+        'contactos': len(c),
+        'segmentos_pared': len(paredes),
+        'f_tan_negativos_%': 100.0 * (c['f_tan'] < 0).mean(),
+        'f_norm_mediana': float(c['f_norm'].median()),
+    }
+
+    # Granos con al menos 2 contactos (los demas no pueden estar en equilibrio estatico)
+    ncont = pd.concat([c['id_a'], c['id_b']]).value_counts()
+    ids = [i for i in p.index if ncont.get(i, 0) >= 2]
+    toca_pared = set(c.loc[c['id_a'] < 0, 'id_b']) | set(c.loc[c['id_b'] < 0, 'id_a'])
+    area = p.loc[ids, 'area'].to_numpy(float)
+    peso = np.array([dens[int(t)] for t in p.loc[ids, 'type']]) * area * g
+    es_disco = (p.loc[ids, 'shape'] == 'Disco').to_numpy()
+    pared = np.array([i in toca_pared for i in ids])
+    clases = {
+        'discos': es_disco & ~pared,
+        'poligonos': ~es_disco & ~pared,
+        'tocan_pared': pared,
+    }
+    info['granos'] = {k: int(v.sum()) for k, v in clases.items()}
+
+    # 1) Hipotesis de signo / dt (normal nueva, granos sin pared)
+    sin_pared = ~pared
+    hip = {
+        'codigo_actual': (+1.0, True), 'signo_anterior': (-1.0, True), 'sin_tangencial': (0.0, True),
+        'codigo_actual_sin_/dt': (+1.0, False), 'signo_anterior_sin_/dt': (-1.0, False),
+        'sin_tang_sin_/dt': (0.0, False),
+    }
+    res_signo = {}
+    for nombre, (s, div) in hip.items():
+        df = fuerzas_contacto(p, c, dt, paredes=paredes, metodo='nuevo', signo_tan=s, dividir_dt=div)
+        S = sumas_por_grano(df, ids)
+        r = np.hypot(S['Fx'], S['Fy'] - peso) / peso
+        res_signo[nombre] = float(np.median(r[sin_pared]))
+
+    # 2) Normal vieja vs nueva, por clase de grano (signo correcto, /dt)
+    res_normal = {}
+    for metodo in ('nuevo', 'viejo'):
+        df = fuerzas_contacto(p, c, dt, paredes=paredes, metodo=metodo)
+        S = sumas_por_grano(df, ids)
+        for clase, mask in clases.items():
+            if mask.sum() == 0:
+                continue
+            res_normal[(metodo, clase)] = metricas({k: v[mask] for k, v in S.items()}, area[mask], peso[mask])
+    return info, res_signo, res_normal
 
 
 def main():
@@ -163,30 +161,31 @@ def main():
 
     dens, dt, g = leer_params(args.sim_path)
     print(f"params.in: densidades={dens} timeStep={dt} g={g}")
-    acum = {}
-    acum_t = {}
+    acum_signo, acum_normal = {}, {}
     for j in args.jam_id:
         xy, ct = buscar_archivos(args.sim_path, j)
-        info, res, tens = diagnosticar(xy, ct, dens, dt, g)
-        for k, d in tens.items():
-            for m, v in d.items():
-                acum_t.setdefault(k, {}).setdefault(m, []).append(v)
-        print(f"\n== atasco {j}: {info['contactos']} contactos, {info['granos_evaluados']} granos evaluados (sin paredes)")
+        info, res_signo, res_normal = diagnosticar(xy, ct, dens, dt, g)
+        print(f"\n== atasco {j}: {info['contactos']} contactos, {info['segmentos_pared']} segmentos de pared, "
+              f"granos: {info['granos']}")
         print(f"   f_tan negativos: {info['f_tan_negativos_%']:.1f} %   "
-              f"(0 % => el archivo guarda |f_tan| y el signo se perdio)")
-        print(f"   f_norm mediana: {info['f_norm_mediana']:.4g}   peso mediano de un grano m*g: {info['peso_grano_mediano_mg']:.4g}")
-        for k, v in res.items():
-            acum.setdefault(k, []).append(v)
-    print("\n== Residuo mediano del equilibrio |sum F - m g| / (m g)  (0 = hipotesis correcta)")
-    for k, v in sorted(acum.items(), key=lambda kv: np.median(kv[1])):
+              f"(0 % => el archivo guarda |f_tan| y el signo se perdio)   f_norm mediana: {info['f_norm_mediana']:.4g}")
+        for k, v in res_signo.items():
+            acum_signo.setdefault(k, []).append(v)
+        for k, d in res_normal.items():
+            for m, v in d.items():
+                acum_normal.setdefault(k, {}).setdefault(m, []).append(v)
+
+    print("\n== 1) Equilibrio de fuerzas, granos sin pared: residuo mediano |sum F - m g| / (m g)  (0 = correcta)")
+    for k, v in sorted(acum_signo.items(), key=lambda kv: np.median(kv[1])):
         print(f"   {k:26s} {np.median(v):10.4f}")
 
-    print("\n== Tensor por grano (granos sin paredes, mediana sobre atascos)")
-    print("   asimetria = |S01 - S10| / |S|  (torque neto relativo; ~0 = simetrico)")
-    print(f"   {'':16s} {'asim mediana':>13s} {'asim p90':>9s} {'P<0 %':>7s} {'tau/P med':>10s} {'tau>P %':>8s}")
-    for k, d in acum_t.items():
-        print(f"   {k:16s} {np.median(d['asim_mediana']):13.4f} {np.median(d['asim_p90']):9.4f} "
-              f"{np.median(d['P_negativa_%']):7.2f} {np.median(d['tau/P_mediana']):10.3f} "
+    print("\n== 2) Por tipo de grano (mediana sobre atascos)")
+    print("   residuo = equilibrio de fuerzas; asim = |S01 - S10| / |S| = torque neto relativo (0 = tensor simetrico)")
+    print(f"   {'normal':7s} {'granos':12s} {'residuo':>9s} {'asim med':>9s} {'asim p90':>9s} "
+          f"{'P<0 %':>7s} {'tau/P':>7s} {'tau>P %':>8s}")
+    for (metodo, clase), d in acum_normal.items():
+        print(f"   {metodo:7s} {clase:12s} {np.median(d['residuo']):9.4f} {np.median(d['asim_med']):9.4f} "
+              f"{np.median(d['asim_p90']):9.4f} {np.median(d['P<0_%']):7.2f} {np.median(d['tau/P']):7.3f} "
               f"{np.median(d['tau>P_%']):8.2f}")
 
 

@@ -33,9 +33,11 @@ main() ─┬─ cargar_master()              índice de simulaciones (radios, l
         ├─ listar_atascos()/leer_lista()  pares (atasco_XXXXX.xy, atasco_contacts_XXXXX.dat)
         ├─ generar_tareas()              un atasco = una tarea
         └─ Pool → process_one_jam_task() ──┬─ parse_xy()                     partículas
+                                           ├─ parse_paredes()                segmentos de paredes/piso
                                            ├─ lee contactos (pd.read_csv)
                                            ├─ detectar_arco_primario()       región "arco"
                                            └─ calcular_tensor_y_presion_vectorizado()   ← tensor, P, τ
+                                                 └─ fuerzas_contacto() → normales_contacto()
            Registro.guardar_lote()   →  partes/*.parquet + resumen_presion_por_atasco.csv
            combinar_partes()         →  presion_por_particula_<Forma>.parquet
            resumen_por_configuracion() → resumen_presion_por_configuracion.csv
@@ -53,7 +55,7 @@ Lee `atasco_XXXXX.xy` (snapshot del atasco, escrito por el simulador):
 |---|---|
 | `id 1 x y r tipo` | disco: centro `(x, y)`, radio `r` |
 | `id n x1 y1 … xn yn tipo` | polígono de `n` lados: vértices absolutos |
-| `id < 0` | paredes/piso: se ignoran como partículas (línea 42) |
+| `id < 0` | paredes/piso: no son partículas (línea 42); las lee `parse_paredes()` |
 
 | Líneas | Qué hace |
 |---|---|
@@ -62,129 +64,128 @@ Lee `atasco_XXXXX.xy` (snapshot del atasco, escrito por el simulador):
 
 El promedio de vértices coincide con el centro de masa solo para polígonos regulares, que es el caso de este proyecto.
 
-### 3.2 Contactos (líneas 497–499)
+### 3.1b Paredes — `parse_paredes()` (líneas 58–74)
+
+Las líneas con `id < 0` del mismo `.xy` son el silo (`ChainShape`, `id -100`) y bordes (`EdgeShape`): `id n x1 y1 … xn yn tipo`. Se convierten en los `n−1` segmentos consecutivos de la cadena (abierta, no se cierra). Se usan para la normal de los contactos polígono–pared (sección 5.2).
+
+### 3.2 Contactos (líneas 583–585)
 
 Lee `atasco_contacts_XXXXX.dat` con 6 columnas:
 
-| Columna | Significado asumido por el código |
+| Columna | Significado (verificado, sección 8) |
 |---|---|
 | `id_a`, `id_b` | cuerpos en contacto (A = fixture A de Box2D; `< 0` = pared) |
 | `px`, `py` | punto de contacto (world manifold) |
-| `f_norm` | **impulso** normal del paso (se divide por `dt` en la línea 349) |
-| `f_tan` | **impulso** tangencial (ídem) |
+| `f_norm` | **impulso** normal del paso (se divide por `dt`, línea 434) |
+| `f_tan` | **impulso** tangencial, **con signo** (convención de Box2D) |
 
-> **A verificar:** estos archivos los escribe el binario del cluster, cuyo código fuente no está en el repo. No está confirmado si `f_norm`/`f_tan` son impulsos o fuerzas, ni si `f_tan` conserva el signo: la función `saveContacts` del repo guarda `fabs(tang)`. Ver la sección 8.
+Estos archivos los escribió el binario del cluster (su código fuente no está en el repo); el formato se verificó con el equilibrio estático de los granos.
 
-### 3.3 Parámetros por atasco — `process_one_jam_task()` (líneas 464–553)
+### 3.3 Parámetros por atasco — `process_one_jam_task()` (líneas 550–640)
 
 | Líneas | Qué hace |
 |---|---|
-| 470–477 | `r_nominal = r_eff · cos(π/n)`: para polígonos pasa del circunradio al **inradio**; para discos queda igual. Se usa solo para separar grandes de chicos. |
-| 479–494 | Umbral grande/chico: `umbral_r = (r_large + r_small)/2`, con radios del índice maestro o, si faltan, de los radios presentes en el atasco. Con χ = 0 o monodisperso, `umbral_r = 0` (todo es "B"). |
-| 501–502 | `r_salida` y `g` de `params.in` (`parse_radio_salida`, `parse_g`, líneas 58–90). `g` se toma en valor absoluto. |
-| 503–505 | Detecta el arco; si no hay arco, el atasco se descarta (`"No arco detectado"`). |
-| 507 | Llama al cálculo del tensor (sección 5). |
-| 509–552 | Agrega metadatos (formas, χ, `jam_id`, `sim_path`) al resumen y a las filas por partícula. |
+| 556–563 | `r_nominal = r_eff · cos(π/n)`: para polígonos pasa del circunradio al **inradio**; para discos queda igual. Se usa solo para separar grandes de chicos. |
+| 565–580 | Umbral grande/chico: `umbral_r = (r_large + r_small)/2`, con radios del índice maestro o, si faltan, de los radios presentes en el atasco. Con χ = 0 o monodisperso, `umbral_r = 0` (todo es "B"). |
+| 587–588 | `r_salida` y `g` de `params.in` (`parse_radio_salida`, `parse_g`, líneas 77–109). `g` se toma en valor absoluto. |
+| 589–591 | Detecta el arco; si no hay arco, el atasco se descarta (`"No arco detectado"`). |
+| 593–594 | Llama al cálculo del tensor (sección 5), pasándole las paredes de `parse_paredes(xy_file)`. |
+| 596–638 | Agrega metadatos (formas, χ, `jam_id`, `sim_path`) al resumen y a las filas por partícula. |
 
-`dt` llega por argumento (`--dt`, default `0.001`, línea 840) y tiene que coincidir con `timeStep` de la simulación.
+`dt` llega por argumento (`--dt`, default `0.001`, línea 927) y tiene que coincidir con `timeStep` de la simulación.
 
 ---
 
-## 4. Detección del arco — `detectar_arco_primario()` (líneas 93–193)
+## 4. Detección del arco — `detectar_arco_primario()` (líneas 112–212)
 
 Define qué partículas son la región `arco`.
 
 | Líneas | Qué hace |
 |---|---|
-| 115–124 | Un par por cada dos partículas en contacto, sin paredes. Si un par tiene 2 puntos de contacto, queda una sola arista. |
-| 126–138 | Grafo con costo de arista `10^{y_max}` del par: favorece mucho los caminos bajos. |
-| 172–175 | Candidatos a extremos: partículas apoyadas en el piso (`y − r < 0.2`) a la izquierda (`x < 0`) y a la derecha (`x > 0`). |
-| 183–193 | Un Dijkstra por cada extremo izquierdo; se queda con el camino de costo mínimo hacia cualquier extremo derecho. |
-| 142–157, 159–170 | `purgar_cimientos`: recorta de cada punta los granos que solo son cimiento (apoyados en el piso fuera del orificio o con ≥ 2 apoyos inferiores ajenos al arco). |
+| 134–143 | Un par por cada dos partículas en contacto, sin paredes. Si un par tiene 2 puntos de contacto, queda una sola arista. |
+| 145–157 | Grafo con costo de arista `10^{y_max}` del par: favorece mucho los caminos bajos. |
+| 191–194 | Candidatos a extremos: partículas apoyadas en el piso (`y − r < 0.2`) a la izquierda (`x < 0`) y a la derecha (`x > 0`). |
+| 202–212 | Un Dijkstra por cada extremo izquierdo; se queda con el camino de costo mínimo hacia cualquier extremo derecho. |
+| 161–176, 178–189 | `purgar_cimientos`: recorta de cada punta los granos que solo son cimiento (apoyados en el piso fuera del orificio o con ≥ 2 apoyos inferiores ajenos al arco). |
 
 ---
 
-## 5. Núcleo: `calcular_tensor_y_presion_vectorizado()` (líneas 296–459)
+## 5. Fuerzas de contacto y tensor
 
-### 5.1 Unir contactos con partículas (líneas 297–308)
+### 5.1 Normal del contacto — `normales_contacto()` (líneas 353–416)
 
-| Líneas | Qué hace |
-|---|---|
-| 300–301 | Une cada contacto con la posición, forma y vértices de A (`_A`) y de B (`_B`). `how='left'`: los contactos con pared no se pierden. |
-| 303–304 | `a_valida`/`b_valida`: el lado es un grano real (no pared). |
-| 307–308 | De qué lado sale la normal: de A si A es grano (`usar_A`); si A es pared, de B (`usar_B`). |
+Devuelve, para cada contacto, la normal unitaria **de A hacia B** (convención de Box2D). Con `metodo='nuevo'` (el que se usa):
 
-### 5.2 Normal del contacto (líneas 310–341)
-
-| Líneas | Caso | Normal |
+| Caso | Normal | Líneas |
 |---|---|---|
-| 313–320 | A es disco | $\hat n = (\mathbf p_c - \mathbf c_A)/\lvert\cdot\rvert$, de A hacia el contacto, es decir de A hacia B. |
-| 322–329 | A es pared, B disco | $\hat n = (\mathbf p_c - \mathbf c_B)/\lvert\cdot\rvert$, de B hacia la pared. |
-| 333–341 | Polígono (A o B) | `normales_poligonos()` (líneas 253–293): lado del polígono más cercano al punto de contacto, normal unitaria orientada hacia afuera del centro. |
+| A o B es **disco** | dirección radial del disco: $(\mathbf p_c-\mathbf c_A)/\lvert\cdot\rvert$ si A es disco, $(\mathbf c_B-\mathbf p_c)/\lvert\cdot\rvert$ si B es disco. **Exacta**: en Box2D el punto de contacto con un círculo está sobre la recta normal que pasa por su centro. | 377–390 |
+| polígono–polígono, polígono–pared | se calcula la normal de la superficie de cada lado (`normales_poligonos`, líneas 272–318; `normales_paredes`, líneas 321–350) junto con su **interioridad**: distancia de la proyección del punto de contacto al vértice más cercano de esa cara. Se usa el lado con mayor interioridad (línea 414): la **cara de referencia** de Box2D, donde el contacto cae en el medio de la cara y no sobre un vértice. | 391–416 |
 
-> En un contacto vértice–lado, si el vértice es del polígono que se usa para la normal, el "lado más cercano" es ambiguo: hay dos lados adyacentes. La normal física es la del **otro** cuerpo. Box2D la tiene exacta en `worldManifold.normal`. Guardarla en el archivo de contactos eliminaría esta aproximación.
+`metodo='viejo'` (líneas 409–413) reproduce la versión anterior: siempre el lado más cercano del polígono A (o de B si A es pared). Falla cuando el contacto es un **vértice** del polígono usado: la normal sale de uno de los dos lados adyacentes en vez de la cara (o centro de disco) del otro cuerpo. Solo queda para comparar en el diagnóstico.
 
-### 5.3 Fuerza sobre A (líneas 343–350)
+Casos de prueba (geometría con normal conocida):
+
+| Caso | Normal vieja | Normal nueva |
+|---|---|---|
+| disco–disco | ✅ | ✅ |
+| vértice de cuadrado A contra disco B | ❌ (1, 0) en vez de (0.71, 0.71) | ✅ |
+| cara de A contra vértice de B | ✅ | ✅ |
+| vértice de A contra cara de B | ❌ (0.71, −0.71) en vez de (0, −1) | ✅ |
+| piso contra cara de cuadrado | ✅ | ✅ |
+| piso contra vértice de cuadrado | ❌ (−0.71, 0.71) en vez de (0, 1) | ✅ |
+
+### 5.2 Fuerza de cada contacto — `fuerzas_contacto()` (líneas 419–439)
 
 ```python
-343  tx = -ny                       # t = n rotada +90°
-344  ty =  nx
-349  Fx_A = (-f_norm*nx + f_tan*tx) / dt
-350  Fy_A = (-f_norm*ny + f_tan*ty) / dt
+427–429  merge de contactos con posición/forma/vértices de A (_A) y B (_B); how='left': las paredes no se pierden
+430      nx, ny = normales_contacto(df, paredes, metodo)       # de A hacia B
+431      tx, ty = -ny, nx                                      # t = n rotada +90°
+435      Fx_A = (-f_norm*nx + f_tan*tx) / dt
+436      Fy_A = (-f_norm*ny + f_tan*ty) / dt
+437–438  a_valida / b_valida: el lado es un grano (no pared)
 ```
 
 - **Parte normal:** `-f_norm·n̂` es la fuerza que B ejerce sobre A. Empuja a A hacia su centro.
 - **Parte tangencial:** `+f_tan·t̂` con `t̂ = (−n_y, n_x)`. En Box2D la tangente es `b2Cross(n, 1) = (n_y, −n_x) = −t̂`, y el impulso sobre B es `fn·n̂ + ft·(n_y, −n_x)`. Sobre A va el opuesto: `−fn·n̂ − ft·(n_y, −n_x) = −fn·n̂ + ft·t̂`.
 - **`/ dt`:** convierte el impulso del paso en fuerza.
+- La fuerza sobre B es siempre **−F_A** (3ª ley).
+- `signo_tan` y `dividir_dt` (argumentos) existen solo para el diagnóstico; el script usa los valores por defecto.
 
-> **Corregido (versión anterior: `− f_tan·t̂`).** El signo tangencial estaba invertido. Se confirmó con el equilibrio estático de cada grano en datos reales (`BARRIDO_2D_DISK_DISK/Chi_0p2_W_2p0`, atascos 1–5, ~5300 granos por atasco): con el signo actual el residuo |ΣF − mg|/(mg) es 0.0002; con el anterior era 15. La versión anterior afectaba a `τ` siempre y a `P` solo en polígonos (en discos $\mathbf r \parallel \hat n$ y la tangencial no aporta a la traza). **Los resultados de τ, y de P en polígonos, generados antes de esta corrección hay que recalcularlos.**
+> **Corregido (versión anterior: `− f_tan·t̂`).** El signo tangencial estaba invertido: con el signo actual el residuo de equilibrio es 0.0002, con el anterior era 15 (sección 8). Afectaba a `τ` siempre y a `P` solo en polígonos. **Los resultados de τ, y de P en polígonos, generados antes de esta corrección hay que recalcularlos.**
 
-### 5.4 Contribución de cada contacto al tensor (líneas 352–374)
-
-Para cada partícula se suma $S_{ij} = \sum_c r_i f_j$, con $\mathbf r = \mathbf p_c - \mathbf c_p$:
-
-| Líneas | Componente | Expresión |
-|---|---|---|
-| 364 / 366 | `S00` = $r_x f_x$ | `Fx · (px − pos_x)` |
-| 365 / 367 | `S11` = $r_y f_y$ | `Fy · (py − pos_y)` |
-| 371 / 373 | `S01` = $r_x f_y$ | `Fy · (px − pos_x)` |
-| 372 / 374 | `S10` = $r_y f_x$ | `Fx · (py − pos_y)` |
-
-- **Lado A (364–365, 371–372):** usa `F_A` tal cual. Si A es pared, aporta 0.
-- **Lado B (366–367, 373–374):** usa `signo_B · F_A` (línea 363).
-  - Contacto grano–grano (`usar_A`): `signo_B = −1`, porque la fuerza sobre B es la reacción −F_A (3ª ley de Newton).
-  - A es pared (`usar_B`): la normal se calculó desde B, así que `F_A` ya es la fuerza sobre B y `signo_B = +1`.
-
-### 5.5 Suma por partícula (líneas 376–384)
+### 5.3 Tensor de cada partícula — `calcular_tensor_y_presion_vectorizado()` (líneas 442–545)
 
 | Líneas | Qué hace |
 |---|---|
-| 378–380 | Suma las contribuciones de todos los contactos donde la partícula es A y donde es B. |
-| 384 | Une con la tabla de partículas. Las partículas sin contactos quedan con `S = 0`. |
+| 448 | Fuerzas de contacto (sección 5.2), con las paredes del atasco. |
+| 449–455 | Vectores rama $\mathbf r = \mathbf p_c - \mathbf c$ para A y para B. |
+| 457–460 | $S_{ij}=\sum_c r_i F_j$: `S00 = r_x F_x`, `S11 = r_y F_y`, `S01 = r_x F_y`, `S10 = r_y F_x`. Sobre A con `F_A`; sobre B con `−F_A`. Si un lado es pared, aporta 0. |
+| 462–466 | Suma las contribuciones de todos los contactos donde la partícula es A y donde es B. |
+| 470 | Une con la tabla de partículas. Las partículas sin contactos quedan con `S = 0`. |
 
-### 5.6 Presión (líneas 385–389)
+### 5.4 Presión (líneas 471–475)
 
 ```python
-385  P = -0.5 * (S00 + S11) / area          # = (σxx + σyy)/2, compresión > 0
-389  P_reducida = P / g
+471  P = -0.5 * (S00 + S11) / area          # = (σxx + σyy)/2, compresión > 0
+475  P_reducida = P / g
 ```
 
-### 5.7 Tensor y deviador (líneas 395–406)
+### 5.5 Tensor y deviador (líneas 481–492)
 
 ```python
-397  σxx = -S00 / area
-398  σyy = -S11 / area
-399  σxy = -0.5 * (S01 + S10) / area         # se simetriza
-402  τ   = sqrt( ((σxx − σyy)/2)**2 + σxy**2 )
-403  τ_reducida = τ / g
-404–406  σxx/g, σyy/g, σxy/g                 # se guardan para recalcular invariantes después
+483  σxx = -S00 / area
+484  σyy = -S11 / area
+485  σxy = -0.5 * (S01 + S10) / area         # se simetriza
+488  τ   = sqrt( ((σxx − σyy)/2)**2 + σxy**2 )
+489  τ_reducida = τ / g
+490–492  σxx/g, σyy/g, σxy/g                 # se guardan para recalcular invariantes después
 ```
 
 | Línea | Detalle |
 |---|---|
-| 395–396 | Si `area = 0` (no debería pasar), el tensor vale 0 en vez de dividir por cero. |
-| 399 | **Simetrización:** con torques balanceados (equilibrio estático) `S01 ≈ S10`. La parte antisimétrica se descarta. |
-| 402 | Radio del círculo de Mohr = $(\sigma_1 - \sigma_2)/2$ = magnitud del deviador 2D. Es invariante ante rotación de ejes. **No** es lo mismo que $\sigma_{xy}$ solo, que depende de los ejes. |
+| 481–482 | Si `area = 0` (no debería pasar), el tensor vale 0 en vez de dividir por cero. |
+| 485 | **Simetrización:** con torques balanceados (equilibrio estático) `S01 ≈ S10`. La parte antisimétrica se descarta. Verificado con datos: el torque neto relativo es ≈ 0 en discos (sección 8). |
+| 488 | Radio del círculo de Mohr = $(\sigma_1 - \sigma_2)/2$ = magnitud del deviador 2D. Es invariante ante rotación de ejes. **No** es lo mismo que $\sigma_{xy}$ solo, que depende de los ejes. |
 
 Relaciones útiles:
 - Esfuerzos principales: $\sigma_{1,2} = P \pm \tau$.
@@ -192,15 +193,15 @@ Relaciones útiles:
 
 Algunos trabajos llaman deviador a $q = \sigma_1-\sigma_2 = 2\tau$; conviene aclarar en el paper cuál se usa.
 
-### 5.8 Regiones y especies (líneas 408–416)
+### 5.6 Regiones y especies (líneas 494–502)
 
 | Líneas | Qué hace |
 |---|---|
-| 408–410 | ROI: franja con `y` entre el grano más bajo del arco y el más alto **+ 10** (en metros: ~10 diámetros de grano grande). Sin arco: `[0, 20]`. |
-| 412–413 | `region = 'arco'` si está en el arco; si no, `'roi'` si está en la franja; si no, `'bulk'`. |
-| 415–416 | `tipo = 'B'` (grande) si `r_nominal ≥ umbral_r`; si no, `'S'` (chico). |
+| 494–496 | ROI: franja con `y` entre el grano más bajo del arco y el más alto **+ 10** (en metros: ~10 diámetros de grano grande). Sin arco: `[0, 20]`. |
+| 498–499 | `region = 'arco'` si está en el arco; si no, `'roi'` si está en la franja; si no, `'bulk'`. |
+| 501–502 | `tipo = 'B'` (grande) si `r_nominal ≥ umbral_r`; si no, `'S'` (chico). |
 
-### 5.9 Resumen por atasco (líneas 417–443)
+### 5.7 Resumen por atasco (líneas 503–529)
 
 Para cada región (`arco`, `roi`, `bulk`) y por especie (`_B`, `_S`), guarda **sumas** y no promedios, así después se pueden juntar varios atascos:
 
@@ -211,21 +212,21 @@ Para cada región (`arco`, `roi`, `bulk`) y por especie (`_B`, `_S`), guarda **s
 | `Area_<reg>[_tipo]` | $\sum_p A_p$ |
 | (+ versiones `_reducida_`, divididas por g) | |
 
-### 5.10 Salida por partícula (líneas 447–456)
+### 5.8 Salida por partícula (líneas 533–542)
 
-`pos_x, pos_y, shape, tipo, region, area, P, P_reducida, tau, tau_reducida, sigma_xx_reducida, sigma_yy_reducida, sigma_xy_reducida, coords`. Los vértices van serializados a JSON (línea 454) para poder dibujar los polígonos.
+`pos_x, pos_y, shape, tipo, region, area, P, P_reducida, tau, tau_reducida, sigma_xx_reducida, sigma_yy_reducida, sigma_xy_reducida, coords`. Los vértices van serializados a JSON (línea 540) para poder dibujar los polígonos.
 
 ---
 
-## 6. Agregación por configuración — `resumen_por_configuracion()` (líneas 794–822)
+## 6. Agregación por configuración — `resumen_por_configuracion()` (líneas 881–910)
 
 | Líneas | Qué hace |
 |---|---|
-| 799–801 | Usa solo atascos de lotes completos (`lotes_ok.txt`). |
-| 802–811 | Agrupa por forma grande/chica, χ, r_chica y carpeta de simulación; suma las columnas `SumP_*`, `SumTau_*`, `Area_*`. |
-| 812–820 | `mean_P_<reg> = ΣSumP / ΣArea` y `mean_tau_<reg> = ΣSumTau / ΣArea`: promedios **pesados por área de partícula**, sobre todas las partículas de todos los atascos de la configuración. |
+| 886–888 | Usa solo atascos de lotes completos (`lotes_ok.txt`). |
+| 889–898 | Agrupa por forma grande/chica, χ, r_chica y carpeta de simulación; suma las columnas `SumP_*`, `SumTau_*`, `Area_*`. |
+| 899–907 | `mean_P_<reg> = ΣSumP / ΣArea` y `mean_tau_<reg> = ΣSumTau / ΣArea`: promedios **pesados por área de partícula**, sobre todas las partículas de todos los atascos de la configuración. |
 
-> `mean_tau` es el promedio de $\lvert\tau\rvert$ de cada partícula. **No** es el τ del tensor promedio de la región. Como cada partícula tiene su propia orientación principal, $\langle\tau_p\rangle \ge \tau(\langle\sigma\rangle)$. Para el deviador macroscópico (por ejemplo $\mu^*$ de la región), primero promediar $\sigma_{xx}, \sigma_{yy}, \sigma_{xy}$ pesados por área (columnas de la salida por partícula) y después aplicar la fórmula de la línea 398.
+> `mean_tau` es el promedio de $\lvert\tau\rvert$ de cada partícula. **No** es el τ del tensor promedio de la región. Como cada partícula tiene su propia orientación principal, $\langle\tau_p\rangle \ge \tau(\langle\sigma\rangle)$. Para el deviador macroscópico (por ejemplo $\mu^*$ de la región), primero promediar $\sigma_{xx}, \sigma_{yy}, \sigma_{xy}$ pesados por área (columnas de la salida por partícula) y después aplicar la fórmula de la línea 488.
 
 > El área usada es la del **sólido** (suma de áreas de partículas), no la de la región. El resultado es el esfuerzo medio dentro de los granos; el esfuerzo de continuo de la región es ≈ φ veces ese valor (φ = fracción de empaquetamiento).
 
@@ -235,35 +236,37 @@ Para cada región (`arco`, `roi`, `bulk`) y por especie (`_B`, `_S`), guarda **s
 
 | Archivo | Contenido |
 |---|---|
-| `<out>/presion_por_particula_<Forma>.parquet` | una fila por partícula y atasco (sección 5.10) |
-| `<out>/resumen_presion_por_atasco.csv` | sumas por región/especie, una fila por atasco (5.9) |
+| `<out>/presion_por_particula_<Forma>.parquet` | una fila por partícula y atasco (sección 5.8) |
+| `<out>/resumen_presion_por_atasco.csv` | sumas por región/especie, una fila por atasco (5.7) |
 | `<out>/resumen_presion_por_configuracion.csv` | promedios pesados por área (6) |
-| `<out>/lotes_ok.txt`, `procesados.txt`, `partes/` | control de lotes para `--reanudar` (`Registro`, líneas 695–760) |
+| `<out>/lotes_ok.txt`, `procesados.txt`, `partes/` | control de lotes para `--reanudar` (`Registro`, líneas 782–848) |
 
 ---
 
 ## 8. Verificaciones
 
-### Ya confirmadas con datos (diagnóstico del 2026-10-02)
-
-Con `verificar_contactos.py` sobre `BARRIDO_2D_DISK_DISK/Chi_0p2_W_2p0`, atascos 1–5:
-
-| Pregunta | Resultado |
-|---|---|
-| ¿Signo de la tangencial? | Convención de Box2D. Residuo de equilibrio **0.0002** con el código actual (líneas 349–350); con el signo anterior era **15**. |
-| ¿`f_tan` tiene signo? | Sí: ~50 % de valores negativos. |
-| ¿Impulsos o fuerzas? | Impulsos: dividir por `dt` es correcto (sin dividir, el residuo es ≈ 1). |
-
-Para repetir el chequeo en otra configuración, por ejemplo una con polígonos:
+Todo se verifica con `analysis/utils/verificar_contactos.py`, que usa **las mismas funciones** (`fuerzas_contacto`, `normales_contacto`, `parse_paredes`) que este script:
 
 ```bash
 python analysis/utils/verificar_contactos.py --sim_path <carpeta_de_una_simulacion> --jam_id 1 2 3 4 5
 ```
 
-La hipótesis `codigo_actual` tiene que dar residuo ≈ 0.
+Mide, por tipo de grano (discos / polígonos / que tocan pared): el residuo del equilibrio de fuerzas |ΣF − mg|/(mg), el torque neto relativo |S01 − S10|/|S| (simetría del tensor), el % de granos con P < 0 y la relación τ/P.
+
+### Confirmadas con datos (2026-10-02)
+
+| Pregunta | Resultado |
+|---|---|
+| ¿Signo de la tangencial? | Convención de Box2D. Discos (`BARRIDO_2D_DISK_DISK/Chi_0p2_W_2p0`): residuo **0.0002** con el signo actual, **15** con el anterior. Cuadrado–disco (`BARRIDO_WIDTHS_SQUARE_DISK/Ratio_0p1_Chi_0p2_W_2p0`): 0.0008 vs 14.7. |
+| ¿`f_tan` tiene signo? | Sí: ~50 % de valores negativos. |
+| ¿Impulsos o fuerzas? | Impulsos: dividir por `dt` es correcto (sin dividir, el residuo es ≈ 1). |
+| ¿Tensor simétrico en discos? | Sí: torque neto relativo 0.0000 (mediana y percentil 90); P < 0 en 0 % de los granos. |
+| ¿Tensor simétrico en cuadrados? | Con la normal **vieja**, no: el 10 % peor de los granos llegaba a 0.42 de torque neto relativo. Origen: la normal en contactos por vértice (sección 5.1). Corregido con la normal nueva; **falta confirmar con datos** (correr el diagnóstico en una carpeta de polígonos y mirar la fila `nuevo / poligonos`). |
+
+Sobre τ > P en ~5 % de los granos (discos): no es un error. Un contacto con fricción ya genera en el tensor del grano un esfuerzo principal levemente negativo (∝ ½[fn ± √(fn² + ft²)]), así que granos con pocos contactos y mucha fricción movilizada pueden tener τ algo mayor que P.
 
 ### Pendientes
 
 1. **Clasificación grande/chico (líneas 477, 494, 416).** Se compara el **inradio** de los polígonos (`r_eff·cos(π/n)`) con un umbral armado con `r_large`/`r_small` del índice. Si esos radios no están en la misma definición (circunradio o radio de igual área), un polígono grande puede quedar como "S" cuando los tamaños son parecidos. Ejemplo con radios de igual área: un triángulo grande equivalente a un disco de r = 0.5 tiene inradio ≈ 0.39; con un disco chico de r = 0.32 (ratio de áreas 0.4) el umbral es ≈ 0.41, así que el triángulo quedaría como chico. Alternativa sin umbral: usar la columna `tipo` del `.xy`, que es la especie exacta de cada grano.
-2. **Normal en contactos vértice–lado de polígonos** (sección 5.2): es una aproximación geométrica; la normal exacta está en Box2D. Conviene correr el diagnóstico en una configuración con polígonos: si el residuo es bastante mayor que en discos, el origen es esta aproximación.
+2. **Confirmar con datos la normal nueva en polígonos** (fila `nuevo / poligonos` del diagnóstico) y, si cierra, **recalcular** `presion_tensor_arch.py` para las mezclas con polígonos (P y τ cambian; Disco–Disco no).
 3. **`simulation/src/save_tensors.cpp`** tiene el mismo signo tangencial invertido. Hoy no se llama desde ningún lado del simulador, pero si se vuelve a usar hay que corregirlo.
