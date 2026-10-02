@@ -6,7 +6,8 @@ import re
 import json
 from multiprocessing import Pool, cpu_count
 
-DT_THRESHOLD = 0.5
+DT_THRESHOLD = 0.5       # s sin granos que cortan una avalancha (BLOCKAGE_THRESHOLD del simulador)
+T_ESPERA_ATASCO = 5.0    # tEsperaAtasco por defecto: s de detencion antes de guardar atasco_XXXXX.xy y desatascar
 JUMP_THRESHOLD = 15.0
 X_LIMS, Y_LIMS = [-10.25, 10.25], [0, 120.0]
 GRID_NX, GRID_NY = 50, 150
@@ -50,6 +51,29 @@ def get_frame_data(filepath):
         return None
 
 
+def parse_t_espera(sim_path, default=T_ESPERA_ATASCO):
+    """tEsperaAtasco de params.in (s), o el valor por defecto."""
+    try:
+        with open(os.path.join(sim_path, "params.in")) as f:
+            for line in f:
+                if line.strip().startswith('tEsperaAtasco:'):
+                    return float(line.split(':')[1].split('#')[0])
+    except Exception:
+        pass
+    return default
+
+
+def contar_atascos_en_disco(sim_path, dir_id=''):
+    """Cantidad de snapshots atasco_XXXXX.xy (sin los de contactos)."""
+    carpetas = [os.path.join(sim_path, f"frames_{dir_id}")] if dir_id != '' else []
+    carpetas += sorted(glob.glob(os.path.join(sim_path, "frames_*")))
+    for d in carpetas:
+        if os.path.isdir(d):
+            return len([f for f in os.listdir(d)
+                        if f.startswith('atasco_') and f.endswith('.xy') and not f.startswith('atasco_contacts_')])
+    return 0
+
+
 def process_everything(sim_row):
     """Procesa una simulación: avalanchas y, opcionalmente, mapas."""
     try:
@@ -72,42 +96,66 @@ def process_everything(sim_row):
                         continue
                     p = line.split()
                     if len(p) >= 3:
-                        events.append({'t': float(p[2]), 'type': int(p[1])})
+                        events.append((float(p[2]), int(p[1])))
 
             if events:
-                events.sort(key=lambda x: x['t'])
-                start_t, last_any_t = events[0]['t'], events[0]['t']
-                count_big, count_total = 0, 0
+                events.sort()
+                # 1) Rachas de descarga: se corta cuando pasan > DT_THRESHOLD sin granos
+                #    (con TODOS los granos, chicos incluidos, igual que el simulador).
+                rachas = []
+                t0, t_ult, big, tot = events[0][0], events[0][0], 0, 0
+                for t, tipo in events:
+                    if t - t_ult > DT_THRESHOLD:
+                        rachas.append((t0, t_ult, big, tot))
+                        t0, big, tot = t, 0, 0
+                    t_ult = t
+                    tot += 1
+                    big += (tipo == target_id)
+                rachas.append((t0, t_ult, big, tot))
 
-                for ev in events:
-                    if (ev['t'] - last_any_t) > DT_THRESHOLD:
-                        if count_big > 0:
-                            avalanchas.append({
-                                'sim_hash': s_hash,
-                                'config_hash': config_hash,
-                                'tirada': sim_row['tirada'],
-                                'duracion': last_any_t - start_t,
-                                'tamano_big': count_big,
-                                'total_mix': count_total,
-                                'radio_salida': sim_row.get('Radio_salida', np.nan),
-                            })
-                        start_t, count_big, count_total = ev['t'], 0, 0
+                # 2) Atascos guardados en el hueco despues de cada racha. El simulador
+                #    declara atasco a los DT_THRESHOLD s sin granos y, si siguen sin
+                #    salir granos, guarda atasco_k.xy y desatasca cada t_espera s:
+                #    k = floor((hueco - DT_THRESHOLD) / t_espera). La ultima racha no
+                #    tiene hueco (la simulacion termina al llegar a maxAvalanchas).
+                t_espera = parse_t_espera(path)
+                n_desp = []
+                for i, (a0, a1, _, _) in enumerate(rachas):
+                    if i + 1 < len(rachas):
+                        hueco = rachas[i + 1][0] - a1
+                        n_desp.append((hueco, max(0, int(np.floor((hueco - DT_THRESHOLD) / t_espera + 1e-6)))))
+                    else:
+                        n_desp.append((np.nan, 0))
 
-                    last_any_t = ev['t']
-                    count_total += 1
-                    if ev['type'] == target_id:
-                        count_big += 1
-
-                if count_big > 0:
-                    avalanchas.append({
-                        'sim_hash': s_hash,
-                        'config_hash': config_hash,
-                        'tirada': sim_row['tirada'],
-                        'duracion': last_any_t - start_t,
-                        'tamano_big': count_big,
-                        'total_mix': count_total,
-                        'radio_salida': sim_row.get('Radio_salida', np.nan),
-                    })
+                # 3) Numeracion de atascos: el primero del hueco es el arco que
+                #    detuvo esa avalancha (los siguientes son desatascos fallidos).
+                #    Solo se confia si el total coincide con los atasco_*.xy en disco.
+                n_pred = sum(n for _, n in n_desp)
+                n_disco = contar_atascos_en_disco(path, dir_id)
+                coincide = (n_pred == n_disco)
+                if not coincide:
+                    print(f"[aviso] {s_hash}: {n_pred} atascos predichos desde flx.dat vs {n_disco} "
+                          f"atasco_*.xy en disco -> no se emparejan avalanchas con arcos en esta simulacion")
+                contador = 0
+                for (a0, a1, big, tot), (hueco, n) in zip(rachas, n_desp):
+                    atasco_id = contador + 1 if (n > 0 and coincide) else np.nan
+                    contador += n
+                    if big > 0:
+                        avalanchas.append({
+                            'sim_hash': s_hash,
+                            'config_hash': config_hash,
+                            'tirada': sim_row['tirada'],
+                            'duracion': a1 - a0,
+                            'tamano_big': big,
+                            'total_mix': tot,
+                            'radio_salida': sim_row.get('Radio_salida', np.nan),
+                            't_inicio': a0,
+                            't_fin': a1,
+                            'hueco_despues': hueco,
+                            'n_atascos_despues': n,
+                            'atasco_id': atasco_id,
+                            'emparejado_ok': coincide,
+                        })
 
         return avalanchas
 

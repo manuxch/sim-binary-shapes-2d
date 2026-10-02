@@ -50,7 +50,7 @@ def ensure_nominal_columns(df):
     return df
 
 
-def main(idx_path=IDX_PATH, av_path=AV_PATH):
+def main(idx_path=IDX_PATH, av_path=AV_PATH, solo_con_arco=False):
     print("[+] Ejecutando análisis estadístico global de flujo y avalanchas...")
 
     if not os.path.exists(idx_path):
@@ -61,6 +61,14 @@ def main(idx_path=IDX_PATH, av_path=AV_PATH):
     df_idx = pd.read_csv(idx_path)
     df_idx = ensure_nominal_columns(df_idx)
     df_av = pd.read_csv(av_path)
+    if solo_con_arco:
+        # Solo avalanchas que terminaron en un atasco guardado (atasco_XXXXX.xy),
+        # es decir, con un arco asociado (ver processor.py, columna atasco_id).
+        if 'atasco_id' not in df_av.columns:
+            return print("El esqueleto no tiene atasco_id: volve a correr processor.py (version nueva).")
+        n0 = len(df_av)
+        df_av = df_av[df_av['atasco_id'].notna()].copy()
+        print(f"--solo_con_arco: {len(df_av)} de {n0} avalanchas tienen un atasco (arco) asociado.")
 
     df_idx['sistema'] = df_idx.apply(get_detailed_system_name, axis=1)
     df_idx['grano_base'] = df_idx['sistema'].apply(lambda x: x.split('-')[0])
@@ -127,7 +135,8 @@ def main(idx_path=IDX_PATH, av_path=AV_PATH):
     res = res.dropna(subset=['log_S'])
 
     os.makedirs(OUT_DIR, exist_ok=True)
-    out_path = os.path.join(OUT_DIR, "estadisticas_flujo_agregadas.csv")
+    nombre = "estadisticas_flujo_agregadas_solo_con_arco.csv" if solo_con_arco else "estadisticas_flujo_agregadas.csv"
+    out_path = os.path.join(OUT_DIR, nombre)
     res.to_csv(out_path, index=False)
 
     print(f"✅ Estadísticas calculadas y consolidadas ({len(res)} casos únicos).")
@@ -135,4 +144,9 @@ def main(idx_path=IDX_PATH, av_path=AV_PATH):
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    ap = argparse.ArgumentParser(description="Estadisticas de avalanchas por configuracion.")
+    ap.add_argument('--solo_con_arco', action='store_true',
+                    help="usa solo las avalanchas que terminaron en un atasco con snapshot (arco); "
+                         "guarda estadisticas_flujo_agregadas_solo_con_arco.csv")
+    main(solo_con_arco=ap.parse_args().solo_con_arco)
