@@ -38,6 +38,9 @@ Sum total / Area total:
 Ademas se guarda <out>_datos.csv con media, std, sem, n y n_eff de cada
 punto.
 
+Eje x (--xlim): mismo rango de chi en todas las figuras, default 0 a 0.4;
+si una forma no tiene datos hasta el final, ese tramo queda vacio.
+
 Leyenda (--leyenda): afuera (default, a la derecha del grafico, no tapa
 datos), arriba (encima del grafico, 2 columnas) o adentro (loc='best').
 
@@ -196,7 +199,7 @@ def limites_y(df_agg, formas, mags, error, regiones=REGIONES, margen=0.05):
 
 
 def graficar_una_forma(df_agg, forma, mag, etiqueta_chi, error='sem', desplazar=0.0,
-                       ylim=None, regiones=REGIONES, leyenda='afuera'):
+                       ylim=None, regiones=REGIONES, leyenda='afuera', xlim=(0.0, 0.4)):
     """Una sola figura, para una sola forma de grano grande y una magnitud:
     arco vs roi, grandes vs chicas, en funcion de chi, con barras de error.
 
@@ -232,6 +235,11 @@ def graficar_una_forma(df_agg, forma, mag, etiqueta_chi, error='sem', desplazar=
 
     if ylim is not None:
         ax.set_ylim(*ylim)
+    # Mismo rango de chi en todas las figuras (aunque una forma no tenga
+    # datos hasta el final), con un margen chico para no cortar los marcadores.
+    if xlim is not None:
+        margen = 0.025 * (xlim[1] - xlim[0])
+        ax.set_xlim(xlim[0] - margen, xlim[1] + margen)
     ax.set_xlabel(etiqueta_chi)
     ax.set_ylabel(MAGNITUDES[mag][1])
     # Leyenda: 'afuera' (a la derecha del eje, nunca tapa datos), 'arriba'
@@ -264,6 +272,8 @@ def main():
     parser.add_argument('--error', choices=['std', 'sem', 'ninguno'], default='sem',
                         help="Barras de error entre atascos: sem = error estandar de la media (default), "
                              "std = desviacion estandar, ninguno = sin barras")
+    parser.add_argument('--xlim', type=float, nargs=2, default=[0.0, 0.4], metavar=('CHIMIN', 'CHIMAX'),
+                        help='rango de chi del eje x, igual en todas las figuras (default 0 0.4)')
     parser.add_argument('--leyenda', choices=['afuera', 'arriba', 'adentro'], default='afuera',
                         help="Posicion de la leyenda: afuera (default, a la derecha del grafico), "
                              "arriba (encima, en 2 columnas) o adentro (donde matplotlib encuentre lugar)")
@@ -341,7 +351,8 @@ def main():
                 continue
             fig = graficar_una_forma(df_agg, forma, mag, args.etiqueta_chi,
                                      error=args.error, desplazar=args.desplazar,
-                                     ylim=ylims.get(mag), leyenda=args.leyenda)
+                                     ylim=ylims.get(mag), leyenda=args.leyenda,
+                                     xlim=tuple(args.xlim))
             out_path = f"{base}{sufijo}_{forma}{ext}"
             guardar_figura(out_path, fig)
             print(f"Guardado: {out_path}")
