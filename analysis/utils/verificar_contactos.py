@@ -118,7 +118,41 @@ def diagnosticar(xy_file, ct_file, dens, dt, g):
         w = peso.reindex(candidatos)
         res[nombre] = float(np.median(np.hypot(sx, sy - w) / w))
     info['granos_evaluados'] = len(candidatos)
-    return info, res
+
+    # Simetria del tensor de cada grano: S01 - S10 = sum(r_x f_y - r_y f_x) es
+    # el torque neto, que en un atasco estatico tiene que ser ~0. Ademas:
+    # P > 0 (compresion) y la relacion tau/P.
+    pb = p.loc[gg['id_b']]
+    rax, ray = dx, dy
+    rbx = gg['px'].to_numpy() - pb['pos_x'].to_numpy()
+    rby = gg['py'].to_numpy() - pb['pos_y'].to_numpy()
+    tens = {}
+    for nombre, s in (('codigo_actual', +1.0), ('signo_anterior', -1.0)):
+        fax = (-fn * nx + s * ft * tx) / dt
+        fay = (-fn * ny + s * ft * ty) / dt
+        comp = {}
+        for k, (ra, rb, fa) in {'S00': (rax, rbx, fax), 'S11': (ray, rby, fay),
+                                'S01': (rax, rbx, fay), 'S10': (ray, rby, fax)}.items():
+            # sobre A: F_A ; sobre B: -F_A (3ra ley)
+            comp[k] = (pd.Series(ra * fa, index=gg['id_a'].to_numpy()).groupby(level=0).sum()
+                       .sub(pd.Series(rb * fa, index=gg['id_b'].to_numpy()).groupby(level=0).sum(),
+                            fill_value=0).reindex(candidatos).fillna(0).to_numpy())
+        S00, S11, S01, S10 = comp['S00'], comp['S11'], comp['S01'], comp['S10']
+        norma = np.sqrt(S00**2 + S11**2 + S01**2 + S10**2)
+        norma[norma == 0] = np.nan
+        area = p.loc[candidatos, 'area'].to_numpy(dtype=float)
+        P = -0.5 * (S00 + S11) / area
+        sxx, syy, sxy = -S00 / area, -S11 / area, -0.5 * (S01 + S10) / area
+        tau = np.sqrt((0.5 * (sxx - syy))**2 + sxy**2)
+        asim = np.abs(S01 - S10) / norma
+        tens[nombre] = {
+            'asim_mediana': float(np.nanmedian(asim)),
+            'asim_p90': float(np.nanpercentile(asim, 90)),
+            'P_negativa_%': 100.0 * float(np.mean(P < 0)),
+            'tau/P_mediana': float(np.nanmedian(tau / np.where(P > 0, P, np.nan))),
+            'tau>P_%': 100.0 * float(np.mean(tau > P)),
+        }
+    return info, res, tens
 
 
 def main():
@@ -130,9 +164,13 @@ def main():
     dens, dt, g = leer_params(args.sim_path)
     print(f"params.in: densidades={dens} timeStep={dt} g={g}")
     acum = {}
+    acum_t = {}
     for j in args.jam_id:
         xy, ct = buscar_archivos(args.sim_path, j)
-        info, res = diagnosticar(xy, ct, dens, dt, g)
+        info, res, tens = diagnosticar(xy, ct, dens, dt, g)
+        for k, d in tens.items():
+            for m, v in d.items():
+                acum_t.setdefault(k, {}).setdefault(m, []).append(v)
         print(f"\n== atasco {j}: {info['contactos']} contactos, {info['granos_evaluados']} granos evaluados (sin paredes)")
         print(f"   f_tan negativos: {info['f_tan_negativos_%']:.1f} %   "
               f"(0 % => el archivo guarda |f_tan| y el signo se perdio)")
@@ -142,6 +180,14 @@ def main():
     print("\n== Residuo mediano del equilibrio |sum F - m g| / (m g)  (0 = hipotesis correcta)")
     for k, v in sorted(acum.items(), key=lambda kv: np.median(kv[1])):
         print(f"   {k:26s} {np.median(v):10.4f}")
+
+    print("\n== Tensor por grano (granos sin paredes, mediana sobre atascos)")
+    print("   asimetria = |S01 - S10| / |S|  (torque neto relativo; ~0 = simetrico)")
+    print(f"   {'':16s} {'asim mediana':>13s} {'asim p90':>9s} {'P<0 %':>7s} {'tau/P med':>10s} {'tau>P %':>8s}")
+    for k, d in acum_t.items():
+        print(f"   {k:16s} {np.median(d['asim_mediana']):13.4f} {np.median(d['asim_p90']):9.4f} "
+              f"{np.median(d['P_negativa_%']):7.2f} {np.median(d['tau/P_mediana']):10.3f} "
+              f"{np.median(d['tau>P_%']):8.2f}")
 
 
 if __name__ == '__main__':
