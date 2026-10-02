@@ -13,8 +13,8 @@ varias hipotesis; la correcta es la que da residuo ~0.
 
 Hipotesis (F sobre el grano A del contacto; n = normal de A hacia B,
 t = (-n_y, n_x), igual que presion_tensor_arch.py):
-  codigo_actual        F_A = (-fn n - ft t) / dt     <- lo que usa presion_tensor_arch.py
-  tangencial_invertida F_A = (-fn n + ft t) / dt     <- convencion de Box2D (tangente = (n_y, -n_x))
+  codigo_actual        F_A = (-fn n + ft t) / dt     <- presion_tensor_arch.py (convencion de Box2D, tangente = (n_y, -n_x))
+  signo_anterior       F_A = (-fn n - ft t) / dt     <- version anterior del script (signo tangencial invertido)
   sin_tangencial       F_A = (-fn n) / dt
   (y las mismas tres sin dividir por dt, por si el archivo ya trae fuerzas)
 
@@ -102,8 +102,8 @@ def diagnosticar(xy_file, ct_file, dens, dt, g):
     candidatos = [i for i in candidatos if ncont.get(i, 0) >= 2]
 
     hip = {
-        'codigo_actual': (-1.0, True), 'tangencial_invertida': (+1.0, True), 'sin_tangencial': (0.0, True),
-        'codigo_actual_sin_/dt': (-1.0, False), 'tang_invertida_sin_/dt': (+1.0, False), 'sin_tang_sin_/dt': (0.0, False),
+        'codigo_actual': (+1.0, True), 'signo_anterior': (-1.0, True), 'sin_tangencial': (0.0, True),
+        'codigo_actual_sin_/dt': (+1.0, False), 'signo_anterior_sin_/dt': (-1.0, False), 'sin_tang_sin_/dt': (0.0, False),
     }
     res = {}
     for nombre, (s, div) in hip.items():

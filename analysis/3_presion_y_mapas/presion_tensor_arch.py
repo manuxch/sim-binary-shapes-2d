@@ -342,8 +342,12 @@ def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, 
 
     df['tx_v'] = -df['ny_v']
     df['ty_v'] = df['nx_v']
-    df['Fx_A'] = ((-df['f_norm'] * df['nx_v'] - df['f_tan'] * df['tx_v']) / dt).astype(np.float32)
-    df['Fy_A'] = ((-df['f_norm'] * df['ny_v'] - df['f_tan'] * df['ty_v']) / dt).astype(np.float32)
+    # Box2D aplica sobre B el impulso fn*n + ft*t_b2d, con t_b2d = (n_y, -n_x)
+    # = -t. Sobre A va el opuesto: -fn*n - ft*t_b2d = -fn*n + ft*t.
+    # (Antes era '- f_tan * t': signo invertido. Verificado con el equilibrio
+    # estatico de cada grano en analysis/utils/verificar_contactos.py.)
+    df['Fx_A'] = ((-df['f_norm'] * df['nx_v'] + df['f_tan'] * df['tx_v']) / dt).astype(np.float32)
+    df['Fy_A'] = ((-df['f_norm'] * df['ny_v'] + df['f_tan'] * df['ty_v']) / dt).astype(np.float32)
 
     # Solo sumamos S00/S11 del lado que efectivamente es un grano real
     # (si es la pared, esa contribucion queda en 0 y no se le "inventa" area).
