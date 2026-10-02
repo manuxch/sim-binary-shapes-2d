@@ -31,12 +31,15 @@ atasco se calcula su media en la region (Sum/Area de ese atasco) y, para
 cada forma+chi, la dispersion de esas medias pesada por el area del
 atasco en la region -- el mismo peso que usa el punto central, que es
 Sum total / Area total:
-  --error std (default): desviacion estandar pesada
-  --error sem           : error estandar = std / sqrt(n_eff),
+  --error sem (default): error estandar = std / sqrt(n_eff),
                           n_eff = (sum w)^2 / sum w^2 (atascos efectivos)
+  --error std           : desviacion estandar pesada
   --error ninguno       : sin barras
 Ademas se guarda <out>_datos.csv con media, std, sem, n y n_eff de cada
 punto.
+
+Leyenda (--leyenda): afuera (default, a la derecha del grafico, no tapa
+datos), arriba (encima del grafico, 2 columnas) o adentro (loc='best').
 
 Si el csv viene de presion_tensor_arch.py con lotes reanudables (columna
 'lote'), solo se usan las filas de lotes confirmados en lotes_ok.txt
@@ -192,8 +195,8 @@ def limites_y(df_agg, formas, mags, error, regiones=REGIONES, margen=0.05):
     return max(0.0, ymin - pad), ymax + pad
 
 
-def graficar_una_forma(df_agg, forma, mag, etiqueta_chi, error='std', desplazar=0.0,
-                       ylim=None, regiones=REGIONES):
+def graficar_una_forma(df_agg, forma, mag, etiqueta_chi, error='sem', desplazar=0.0,
+                       ylim=None, regiones=REGIONES, leyenda='afuera'):
     """Una sola figura, para una sola forma de grano grande y una magnitud:
     arco vs roi, grandes vs chicas, en funcion de chi, con barras de error.
 
@@ -231,7 +234,15 @@ def graficar_una_forma(df_agg, forma, mag, etiqueta_chi, error='std', desplazar=
         ax.set_ylim(*ylim)
     ax.set_xlabel(etiqueta_chi)
     ax.set_ylabel(MAGNITUDES[mag][1])
-    ax.legend(title=label_forma, loc='best')
+    # Leyenda: 'afuera' (a la derecha del eje, nunca tapa datos), 'arriba'
+    # (encima del eje, en 2 columnas) o 'adentro' (loc='best', como antes).
+    if leyenda == 'afuera':
+        ax.legend(title=label_forma, loc='upper left', bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0)
+    elif leyenda == 'arriba':
+        ax.legend(title=label_forma, loc='lower center', bbox_to_anchor=(0.5, 1.02), ncol=2,
+                  borderaxespad=0.0)
+    else:
+        ax.legend(title=label_forma, loc='best')
     return fig
 
 
@@ -250,9 +261,12 @@ def main():
                         help='Lista de forma_grande a incluir (default: todas las presentes en el csv)')
     parser.add_argument('--chi_min', type=float, default=None)
     parser.add_argument('--chi_max', type=float, default=None)
-    parser.add_argument('--error', choices=['std', 'sem', 'ninguno'], default='std',
-                        help="Barras de error entre atascos: std = desviacion estandar (default), "
-                             "sem = error estandar de la media, ninguno = sin barras")
+    parser.add_argument('--error', choices=['std', 'sem', 'ninguno'], default='sem',
+                        help="Barras de error entre atascos: sem = error estandar de la media (default), "
+                             "std = desviacion estandar, ninguno = sin barras")
+    parser.add_argument('--leyenda', choices=['afuera', 'arriba', 'adentro'], default='afuera',
+                        help="Posicion de la leyenda: afuera (default, a la derecha del grafico), "
+                             "arriba (encima, en 2 columnas) o adentro (donde matplotlib encuentre lugar)")
     parser.add_argument('--desplazar', type=float, default=0.0,
                         help="Desplazamiento horizontal entre series, como fraccion del rango de "
                              "chi (ej. 0.004), para que las barras no se superpongan. Default 0.")
@@ -327,7 +341,7 @@ def main():
                 continue
             fig = graficar_una_forma(df_agg, forma, mag, args.etiqueta_chi,
                                      error=args.error, desplazar=args.desplazar,
-                                     ylim=ylims.get(mag))
+                                     ylim=ylims.get(mag), leyenda=args.leyenda)
             out_path = f"{base}{sufijo}_{forma}{ext}"
             guardar_figura(out_path, fig)
             print(f"Guardado: {out_path}")
