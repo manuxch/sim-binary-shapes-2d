@@ -37,3 +37,6 @@ render/
 
 # Figuras viejas exportadas del historial (limpieza_historial/1_exportar_historico.py)
 processed_data/_historico/
+
+# Salidas de presion_tensor_arch.py (parquet, csv, lotes_ok.txt, procesados.txt, log)
+processed_data/presion/tensor_*/
