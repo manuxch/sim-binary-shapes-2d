@@ -293,7 +293,230 @@ def normales_poligonos(px, py, cx, cy, coords):
     return out
 
 
-def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, dt, umbral_r, g=9.8):
+# ---------------------------------------------------------------------------
+# Normal de contacto: reconstruccion fiel a Box2D
+# ---------------------------------------------------------------------------
+# El archivo de contactos no trae worldManifold.normal, asi que hay que
+# reconstruirla con la geometria del .xy. Para discos es exacta (pasa por el
+# centro del disco). Para poligonos NO alcanza con "el lado mas cercano del
+# poligono A": cuando el punto de contacto es un vertice de A (contacto
+# vertice-lado con A como incidente, o los extremos de un contacto
+# cara-cara) ese criterio elige un lado vecino y la normal sale girada
+# 60-120 grados. Por eso se replica el criterio de Box2D 2.4
+# (b2CollidePolygons / b2CollideEdgeAndPolygon): la normal es la de la cara
+# de referencia, elegida por maxima separacion (SAT) entre las caras de A y
+# las de B.
+
+B2_LINEAR_SLOP = 0.005
+B2_POLYGON_RADIUS = 2.0 * B2_LINEAR_SLOP
+
+
+def parse_paredes(filename):
+    """Lee las paredes (id < 0) del .xy: {gID: [segmentos]}. Cada segmento es
+    un dict con v1, v2 (extremos), v0/v3 (vertices vecinos de la cadena, o
+    None en los extremos) y one_sided (True para b2ChainShape, que en Box2D
+    2.4 colisiona de un solo lado; False para b2EdgeShape de 2 vertices)."""
+    paredes = {}
+    with open(filename, "r") as f:
+        for line in f:
+            p = line.split()
+            if not p:
+                continue
+            pid = int(p[0])
+            if pid >= 0:
+                continue
+            n = int(p[1])
+            v = np.array(p[2:2 + 2 * n], dtype=np.float64).reshape(-1, 2)
+            one_sided = n > 2
+            segs = paredes.setdefault(pid, [])
+            for i in range(n - 1):
+                segs.append({
+                    "v0": v[i - 1] if i > 0 else None,
+                    "v1": v[i], "v2": v[i + 1],
+                    "v3": v[i + 2] if i + 2 < n else None,
+                    "one_sided": one_sided,
+                })
+    return paredes
+
+
+def _normales_salientes(V):
+    """V: (k, n, 2) vertices de k poligonos convexos. Devuelve la normal
+    unitaria saliente de cada cara i (de V[i] a V[i+1]), sin depender del
+    sentido en que esten ordenados los vertices."""
+    d = np.roll(V, -1, axis=1) - V
+    m = np.stack([d[..., 1], -d[..., 0]], -1)
+    norma = np.hypot(m[..., 0], m[..., 1])
+    m = m / np.where(norma > 0, norma, 1.0)[..., None]
+    c = V.mean(axis=1, keepdims=True)
+    adentro = ((V - c) * m).sum(-1) < 0
+    m[adentro] *= -1
+    return m
+
+
+def _max_separacion(V1, m1, V2):
+    """b2FindMaxSeparation vectorizado: para cada cara i de 1, la separacion
+    es min_j n_i.(V2_j - V1_i); devuelve (separacion maxima, indice)."""
+    sep = np.einsum('kid,kijd->kij', m1, V2[:, None, :, :] - V1[:, :, None, :]).min(axis=2)
+    i = np.argmax(sep, axis=1)
+    return sep[np.arange(len(sep)), i], i
+
+
+def normales_poligono_poligono(coords_A, coords_B):
+    """Normal de A hacia B para contactos poligono-poligono, como
+    b2CollidePolygons: cara de referencia de B si sepB > sepA + 0.1*slop;
+    si no, de A."""
+    coords_A = list(coords_A)
+    coords_B = list(coords_B)
+    out = np.zeros((len(coords_A), 2))
+    na = np.array([len(c) for c in coords_A])
+    nb = np.array([len(c) for c in coords_B])
+    for ka, kb in set(zip(na.tolist(), nb.tolist())):
+        sel = np.flatnonzero((na == ka) & (nb == kb))
+        VA = np.stack([np.asarray(coords_A[i], dtype=np.float64) for i in sel])
+        VB = np.stack([np.asarray(coords_B[i], dtype=np.float64) for i in sel])
+        mA = _normales_salientes(VA)
+        mB = _normales_salientes(VB)
+        sA, iA = _max_separacion(VA, mA, VB)
+        sB, iB = _max_separacion(VB, mB, VA)
+        filas = np.arange(len(sel))
+        usar_cara_B = sB > sA + 0.1 * B2_LINEAR_SLOP
+        out[sel] = np.where(usar_cara_B[:, None], -mB[filas, iB], mA[filas, iA])
+    return out
+
+
+def _segmento_mas_cercano(segs, px, py):
+    p = np.array([px, py])
+    mejor, dmin = None, np.inf
+    for s in segs:
+        d = s["v2"] - s["v1"]
+        l2 = d @ d
+        t = np.clip(((p - s["v1"]) @ d) / l2, 0.0, 1.0) if l2 > 0 else 0.0
+        dist = np.sum((p - (s["v1"] + t * d)) ** 2)
+        if dist < dmin:
+            mejor, dmin = s, dist
+    return mejor
+
+
+def normal_pared_poligono(seg, V):
+    """Normal de la pared (A) hacia el poligono (B), como
+    b2CollideEdgeAndPolygon de Box2D 2.4 (incluido el "snap" de las cadenas
+    en esquinas concavas)."""
+    V = np.asarray(V, dtype=np.float64)
+    v1, v2 = seg["v1"], seg["v2"]
+    e1 = v2 - v1
+    e1 = e1 / np.hypot(*e1)
+    n1 = np.array([e1[1], -e1[0]])
+    radio = 2.0 * B2_POLYGON_RADIUS
+
+    # Eje de la pared (se prueban las dos caras, como b2ComputeEdgeSeparation)
+    sep_e, n_e = -np.inf, None
+    for ax in (n1, -n1):
+        s = np.min((V - v1) @ ax)
+        if s > sep_e:
+            sep_e, n_e = s, ax
+
+    # Ejes de las caras del poligono (b2ComputePolygonSeparation)
+    m = _normales_salientes(V[None])[0]
+    sep_p, n_p = -np.inf, None
+    for i in range(len(V)):
+        n = -m[i]
+        s = min(n @ (V[i] - v1), n @ (V[i] - v2))
+        if s > sep_p:
+            sep_p, n_p = s, n
+
+    if sep_p - radio > 0.98 * (sep_e - radio) + 0.001:
+        normal, es_pared = n_p, False
+    else:
+        normal, es_pared = n_e, True
+
+    if seg["one_sided"] and not es_pared:
+        # Colision suave de b2ChainShape: en esquinas concavas se fuerza el
+        # eje de la pared.
+        if normal @ e1 <= 0.0:
+            if seg["v0"] is not None:
+                e0 = v1 - seg["v0"]
+                if e0[0] * e1[1] - e0[1] * e1[0] < 0.0:
+                    normal = n_e
+        elif seg["v3"] is not None:
+            e2 = seg["v3"] - v2
+            if e1[0] * e2[1] - e1[1] * e2[0] < 0.0:
+                normal = n_e
+    return normal
+
+
+def normales_contactos(df, paredes=None):
+    """Normal unitaria de A hacia B para cada contacto (la misma convencion
+    que worldManifold.normal de Box2D). df tiene px, py y las columnas
+    pos_x_*, pos_y_*, shape_*, coords_* de A y de B (NaN si el cuerpo no es
+    un grano del .xy, por ejemplo una pared).
+
+    - A disco: n = (p_c - c_A)/|.|              (exacta)
+    - B disco: n = (c_B - p_c)/|.|              (exacta)
+    - poligono-poligono: SAT como b2CollidePolygons
+    - pared-poligono: SAT como b2CollideEdgeAndPolygon (si el .xy trae la
+      geometria de la pared; si no, se aproxima con el lado del poligono
+      mas cercano al punto de contacto)
+    """
+    m = len(df)
+    n = np.zeros((m, 2))
+    if m == 0:
+        return n
+    px = df['px'].to_numpy(dtype=np.float64)
+    py = df['py'].to_numpy(dtype=np.float64)
+    shA = df['shape_A'].to_numpy(dtype=object)
+    shB = df['shape_B'].to_numpy(dtype=object)
+    a_valida = pd.notna(df['shape_A']).to_numpy()
+    b_valida = pd.notna(df['shape_B']).to_numpy()
+    discoA = a_valida & (shA == 'Disco')
+    discoB = b_valida & (shB == 'Disco') & ~discoA
+    polyA = a_valida & ~discoA & (shA != 'Disco')
+    polyB = b_valida & (shB != 'Disco')
+
+    def desde_centro(mask, lado, signo):
+        dx = px[mask] - df[f'pos_x_{lado}'].to_numpy(dtype=np.float64)[mask]
+        dy = py[mask] - df[f'pos_y_{lado}'].to_numpy(dtype=np.float64)[mask]
+        r = np.hypot(dx, dy)
+        r = np.where(r > 0, r, np.inf)
+        n[mask, 0] = signo * dx / r
+        n[mask, 1] = signo * dy / r
+
+    desde_centro(discoA, 'A', +1.0)
+    desde_centro(discoB, 'B', -1.0)
+
+    pp = polyA & polyB & ~discoB
+    if pp.any():
+        n[pp] = normales_poligono_poligono(df['coords_A'].to_numpy()[pp], df['coords_B'].to_numpy()[pp])
+
+    paredes = paredes or {}
+    id_a = df['id_a'].to_numpy()
+    id_b = df['id_b'].to_numpy()
+    # Poligono contra algo que no es grano (pared u otro cuerpo fuera del .xy)
+    solo_B = ~a_valida & polyB
+    solo_A = polyA & ~b_valida
+    for mask, lado, otro_id, signo in ((solo_B, 'B', id_a, +1.0), (solo_A, 'A', id_b, -1.0)):
+        if not mask.any():
+            continue
+        coords = df[f'coords_{lado}'].to_numpy()
+        cx = df[f'pos_x_{lado}'].to_numpy(dtype=np.float64)
+        cy = df[f'pos_y_{lado}'].to_numpy(dtype=np.float64)
+        sin_pared = []
+        for k in np.flatnonzero(mask):
+            segs = paredes.get(int(otro_id[k]))
+            if segs:
+                seg = _segmento_mas_cercano(segs, px[k], py[k])
+                # normal_pared_poligono va de la pared al poligono
+                n[k] = signo * normal_pared_poligono(seg, coords[k])
+            else:
+                sin_pared.append(k)
+        if sin_pared:
+            k = np.array(sin_pared)
+            nv = normales_poligonos(px[k], py[k], cx[k], cy[k], coords[k])
+            # nv sale del poligono: si el poligono es B hay que invertirla
+            n[k] = -signo * nv
+    return n
+
+
+def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, dt, umbral_r, g=9.8, paredes=None):
     part_cols = df_particles[['pos_x', 'pos_y', 'shape', 'coords']]
     # how='left' en vez del inner-join por defecto: un contacto contra la
     # pared (id<0, sin fila en df_particles) ya NO se descarta entero.
@@ -302,43 +525,12 @@ def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, 
 
     a_valida = df['shape_A'].notna()
     b_valida = df['shape_B'].notna()
-    # Preferimos el lado A para la normal (igual que el codigo original)
-    # si A es un grano real; si A es la pared, usamos B en su lugar.
-    usar_A = a_valida
-    usar_B = (~a_valida) & b_valida
 
-    df['nx_v'] = np.float32(0.0)
-    df['ny_v'] = np.float32(0.0)
-
-    mask_disk_A = usar_A & (df['shape_A'] == 'Disco')
-    if mask_disk_A.any():
-        nx = df.loc[mask_disk_A, 'px'] - df.loc[mask_disk_A, 'pos_x_A']
-        ny = df.loc[mask_disk_A, 'py'] - df.loc[mask_disk_A, 'pos_y_A']
-        norma = np.hypot(nx, ny)
-        valid = norma > 0
-        df.loc[mask_disk_A, 'nx_v'] = np.where(valid, nx / norma, 0.0).astype(np.float32)
-        df.loc[mask_disk_A, 'ny_v'] = np.where(valid, ny / norma, 0.0).astype(np.float32)
-
-    mask_disk_B = usar_B & (df['shape_B'] == 'Disco')
-    if mask_disk_B.any():
-        nx = df.loc[mask_disk_B, 'px'] - df.loc[mask_disk_B, 'pos_x_B']
-        ny = df.loc[mask_disk_B, 'py'] - df.loc[mask_disk_B, 'pos_y_B']
-        norma = np.hypot(nx, ny)
-        valid = norma > 0
-        df.loc[mask_disk_B, 'nx_v'] = np.where(valid, nx / norma, 0.0).astype(np.float32)
-        df.loc[mask_disk_B, 'ny_v'] = np.where(valid, ny / norma, 0.0).astype(np.float32)
-
-    # Poligonos: antes con df.apply fila por fila (un loop de Python por
-    # contacto, lo mas lento de todo el script); ahora vectorizado.
-    for lado, usar in (('A', usar_A), ('B', usar_B)):
-        mask_poly = usar & df[f'shape_{lado}'].notna() & (df[f'shape_{lado}'] != 'Disco')
-        if mask_poly.any():
-            sub = df.loc[mask_poly]
-            nrm = normales_poligonos(sub['px'].to_numpy(), sub['py'].to_numpy(),
-                                     sub[f'pos_x_{lado}'].to_numpy(), sub[f'pos_y_{lado}'].to_numpy(),
-                                     sub[f'coords_{lado}'].to_numpy())
-            df.loc[mask_poly, 'nx_v'] = nrm[:, 0].astype(np.float32)
-            df.loc[mask_poly, 'ny_v'] = nrm[:, 1].astype(np.float32)
+    # Normal de A hacia B (convencion de worldManifold.normal), para todos
+    # los tipos de contacto (ver normales_contactos).
+    nrm = normales_contactos(df, paredes)
+    df['nx_v'] = nrm[:, 0].astype(np.float32)
+    df['ny_v'] = nrm[:, 1].astype(np.float32)
 
     df['tx_v'] = -df['ny_v']
     df['ty_v'] = df['nx_v']
@@ -349,29 +541,23 @@ def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, 
     df['Fx_A'] = ((-df['f_norm'] * df['nx_v'] + df['f_tan'] * df['tx_v']) / dt).astype(np.float32)
     df['Fy_A'] = ((-df['f_norm'] * df['ny_v'] + df['f_tan'] * df['ty_v']) / dt).astype(np.float32)
 
-    # Solo sumamos S00/S11 del lado que efectivamente es un grano real
-    # (si es la pared, esa contribucion queda en 0 y no se le "inventa" area).
-    #
-    # Cuidado con el signo: cuando la normal se calculo desde el lado A
-    # (usar_A, el caso normal grano-grano), Fx_A/Fy_A es la fuerza sobre A,
-    # y la reaccion de B es -Fx_A (3ra ley de Newton) -> signo -1.
-    # Pero cuando A es la pared y se uso la geometria de B en su lugar
-    # (usar_B), Fx_A/Fy_A calculado con esa misma formula YA ES
-    # directamente la fuerza real sobre B -> no hay que invertir el signo.
-    # Antes se invertia siempre, lo que daba presion con signo mal (a veces
-    # negativa) en particulas tocando el piso o las paredes.
-    signo_B = np.where(usar_B, 1.0, -1.0).astype(np.float32)
-    df['S00_A'] = np.where(a_valida, (df['Fx_A'] * (df['px'] - df['pos_x_A'])).astype(np.float32), 0.0)
-    df['S11_A'] = np.where(a_valida, (df['Fy_A'] * (df['py'] - df['pos_y_A'])).astype(np.float32), 0.0)
-    df['S00_B'] = np.where(b_valida, (signo_B * df['Fx_A'] * (df['px'] - df['pos_x_B'])).astype(np.float32), 0.0)
-    df['S11_B'] = np.where(b_valida, (signo_B * df['Fy_A'] * (df['py'] - df['pos_y_B'])).astype(np.float32), 0.0)
-    # Componentes cruzadas, misma convencion S_ij = r_i * F_j que S00/S11
-    # (r = punto de contacto - centro de la particula):
-    #   S01 = r_x F_y,  S10 = r_y F_x
-    df['S01_A'] = np.where(a_valida, (df['Fy_A'] * (df['px'] - df['pos_x_A'])).astype(np.float32), 0.0)
-    df['S10_A'] = np.where(a_valida, (df['Fx_A'] * (df['py'] - df['pos_y_A'])).astype(np.float32), 0.0)
-    df['S01_B'] = np.where(b_valida, (signo_B * df['Fy_A'] * (df['px'] - df['pos_x_B'])).astype(np.float32), 0.0)
-    df['S10_B'] = np.where(b_valida, (signo_B * df['Fx_A'] * (df['py'] - df['pos_y_B'])).astype(np.float32), 0.0)
+    # Con la normal siempre de A hacia B, la fuerza sobre B es la reaccion
+    # -F_A (3ra ley de Newton) en todos los casos, tambien cuando A es una
+    # pared. Solo se suma el lado que es un grano real.
+    # Convencion S_ij = r_i F_j, con r = punto de contacto - centro:
+    #   S00 = r_x F_x, S11 = r_y F_y, S01 = r_x F_y, S10 = r_y F_x
+    rxA = df['px'] - df['pos_x_A']
+    ryA = df['py'] - df['pos_y_A']
+    rxB = df['px'] - df['pos_x_B']
+    ryB = df['py'] - df['pos_y_B']
+    df['S00_A'] = np.where(a_valida, (df['Fx_A'] * rxA).astype(np.float32), 0.0)
+    df['S11_A'] = np.where(a_valida, (df['Fy_A'] * ryA).astype(np.float32), 0.0)
+    df['S01_A'] = np.where(a_valida, (df['Fy_A'] * rxA).astype(np.float32), 0.0)
+    df['S10_A'] = np.where(a_valida, (df['Fx_A'] * ryA).astype(np.float32), 0.0)
+    df['S00_B'] = np.where(b_valida, (-df['Fx_A'] * rxB).astype(np.float32), 0.0)
+    df['S11_B'] = np.where(b_valida, (-df['Fy_A'] * ryB).astype(np.float32), 0.0)
+    df['S01_B'] = np.where(b_valida, (-df['Fy_A'] * rxB).astype(np.float32), 0.0)
+    df['S10_B'] = np.where(b_valida, (-df['Fx_A'] * ryB).astype(np.float32), 0.0)
 
     comps_A = {'S00_A': 'S00', 'S11_A': 'S11', 'S01_A': 'S01', 'S10_A': 'S10'}
     comps_B = {'S00_B': 'S00', 'S11_B': 'S11', 'S01_B': 'S01', 'S10_B': 'S10'}
@@ -504,7 +690,8 @@ def process_one_jam_task(xy_file, contact_file, jam_id, config_id, dt, r_large_m
         if not arco_path:
             return {"ok": False, "error": "No arco detectado"}
             
-        summary, particulas = calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, dt, umbral_r, g=g_abs)
+        paredes = parse_paredes(xy_file)
+        summary, particulas = calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, dt, umbral_r, g=g_abs, paredes=paredes)
         
         if pd.notna(sides_large_m):
             forma_grande = nombre_forma(sides_large_m)

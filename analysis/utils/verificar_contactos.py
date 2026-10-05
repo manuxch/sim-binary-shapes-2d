@@ -12,7 +12,8 @@ paredes ni piso se calcula el residuo |sum F - (0, m g)| / (m g) bajo
 varias hipotesis; la correcta es la que da residuo ~0.
 
 Hipotesis (F sobre el grano A del contacto; n = normal de A hacia B,
-t = (-n_y, n_x), igual que presion_tensor_arch.py):
+t = (-n_y, n_x), con la misma normal que presion_tensor_arch.py, ver
+normales_contactos):
   codigo_actual        F_A = (-fn n + ft t) / dt     <- presion_tensor_arch.py (convencion de Box2D, tangente = (n_y, -n_x))
   signo_anterior       F_A = (-fn n - ft t) / dt     <- version anterior del script (signo tangencial invertido)
   sin_tangencial       F_A = (-fn n) / dt
@@ -31,7 +32,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "3_presion_y_mapas"))
-from presion_tensor_arch import parse_xy, normales_poligonos  # noqa: E402
+from presion_tensor_arch import parse_xy, normales_contactos  # noqa: E402
 
 
 def leer_params(sim_path):
@@ -76,22 +77,15 @@ def diagnosticar(xy_file, ct_file, dens, dt, g):
     toca_pared = set(c.loc[c['id_a'] < 0, 'id_b']) | set(c.loc[c['id_b'] < 0, 'id_a'])
     gg = c[(c['id_a'] >= 0) & (c['id_b'] >= 0) & c['id_a'].isin(p.index) & c['id_b'].isin(p.index)].copy()
 
-    # Normal de A hacia B (misma geometria que presion_tensor_arch.py)
+    # Normal de A hacia B (la misma funcion que presion_tensor_arch.py)
+    pc = p[['pos_x', 'pos_y', 'shape', 'coords']]
+    m = (gg.merge(pc, left_on='id_a', right_index=True, how='left')
+           .merge(pc, left_on='id_b', right_index=True, how='left', suffixes=('_A', '_B')))
+    nrm = normales_contactos(m)
+    nx, ny = nrm[:, 0], nrm[:, 1]
     pa = p.loc[gg['id_a']]
-    nx = np.zeros(len(gg))
-    ny = np.zeros(len(gg))
-    es_disco = (pa['shape'] == 'Disco').to_numpy()
     dx = gg['px'].to_numpy() - pa['pos_x'].to_numpy()
     dy = gg['py'].to_numpy() - pa['pos_y'].to_numpy()
-    nr = np.hypot(dx, dy)
-    nr[nr == 0] = 1.0
-    nx[es_disco], ny[es_disco] = (dx / nr)[es_disco], (dy / nr)[es_disco]
-    if (~es_disco).any():
-        sel = ~es_disco
-        nv = normales_poligonos(gg['px'].to_numpy()[sel], gg['py'].to_numpy()[sel],
-                                pa['pos_x'].to_numpy()[sel], pa['pos_y'].to_numpy()[sel],
-                                pa['coords'].to_numpy()[sel])
-        nx[sel], ny[sel] = nv[:, 0], nv[:, 1]
     tx, ty = -ny, nx
     fn = gg['f_norm'].to_numpy()
     ft = gg['f_tan'].to_numpy()
@@ -116,7 +110,8 @@ def diagnosticar(xy_file, ct_file, dens, dt, g):
             pd.Series(fay, index=gg['id_b'].to_numpy()).groupby(level=0).sum(), fill_value=0)
         sx, sy = sx.reindex(candidatos).fillna(0), sy.reindex(candidatos).fillna(0)
         w = peso.reindex(candidatos)
-        res[nombre] = float(np.median(np.hypot(sx, sy - w) / w))
+        r = np.hypot(sx, sy - w) / w
+        res[nombre] = (float(np.median(r)), 100.0 * float(np.mean(r > 0.01)))
     info['granos_evaluados'] = len(candidatos)
 
     # Simetria del tensor de cada grano: S01 - S10 = sum(r_x f_y - r_y f_x) es
@@ -177,9 +172,11 @@ def main():
         print(f"   f_norm mediana: {info['f_norm_mediana']:.4g}   peso mediano de un grano m*g: {info['peso_grano_mediano_mg']:.4g}")
         for k, v in res.items():
             acum.setdefault(k, []).append(v)
-    print("\n== Residuo mediano del equilibrio |sum F - m g| / (m g)  (0 = hipotesis correcta)")
-    for k, v in sorted(acum.items(), key=lambda kv: np.median(kv[1])):
-        print(f"   {k:26s} {np.median(v):10.4f}")
+    print("\n== Residuo del equilibrio |sum F - m g| / (m g)  (0 = hipotesis correcta)")
+    print("   (la mediana sola puede esconder errores en una fraccion de granos: mirar tambien '% > 1%')")
+    print(f"   {'':26s} {'mediana':>10s} {'% > 1%':>8s}")
+    for k, v in sorted(acum.items(), key=lambda kv: np.median([x[0] for x in kv[1]])):
+        print(f"   {k:26s} {np.median([x[0] for x in v]):10.4f} {np.median([x[1] for x in v]):8.2f}")
 
     print("\n== Tensor por grano (granos sin paredes, mediana sobre atascos)")
     print("   asimetria = |S01 - S10| / |S|  (torque neto relativo; ~0 = simetrico)")
