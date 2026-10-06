@@ -52,6 +52,9 @@ FORMATO = 'pdf'      # igual que save_plot() de graficos_finales.py
 # /home/juli/work/... pero en esta PC el disco esta en /mnt/h/work/...).
 PREFIJO_VIEJO = None
 PREFIJO_NUEVO = None
+# Intervalo de tiempo a analizar (s); None = desde el principio / hasta el final
+T_MIN = None
+T_MAX = None
 
 
 def calcular_chi_temporal(row):
@@ -113,7 +116,16 @@ def calcular_chi_temporal(row):
         return {**base, 'status': 'tipo_mismatch',
                 'detail': f'flux tiene {sorted(tipos_en_flux)}, se esperaba subset de {sorted(tipos_esperados)}'}, None
 
-    t_start = df_flux['tiempo'].min()
+    # recorte temporal: las ventanas arrancan en T_MIN (si se dio)
+    if T_MIN is not None:
+        df_flux = df_flux[df_flux['tiempo'] >= T_MIN]
+    if T_MAX is not None:
+        df_flux = df_flux[df_flux['tiempo'] <= T_MAX]
+    if df_flux.empty:
+        return {**base, 'status': 'sin_datos_en_intervalo', 'detail': f'[{T_MIN}, {T_MAX}] s'}, None
+    df_flux = df_flux.copy()
+
+    t_start = T_MIN if T_MIN is not None else df_flux['tiempo'].min()
     t_end = df_flux['tiempo'].max()
     bins = np.arange(t_start, t_end + WINDOW_SIZE, WINDOW_SIZE)
     if len(bins) < 2:
@@ -193,6 +205,7 @@ def analizar_flujo_temporal(row):
         plt.xlabel(r"Simulation Time (s)")
         plt.ylabel(r"Outflow Concentration $\chi_{out}$")
         plt.ylim(0, min(1.0, max(chi_nominal * 2.5, df_plot['chi_eff'].max() * 1.3, 0.05)))
+        _xlim_intervalo(plt.gca())
         plt.legend(title=f"{label_en}, run {tirada}", loc='upper right')
 
         graph_name = f"dinamica_flujo_final_{sim_hash}_T{tirada}.{FORMATO}"
@@ -205,7 +218,14 @@ def analizar_flujo_temporal(row):
     return {**base, 'status': 'ok'}
 
 
-def figura_comparativa(df_idx, casos, out, normalizar=False, t_max=None):
+def _xlim_intervalo(ax):
+    """Si se pidio un intervalo, el eje x va exactamente de T_MIN a T_MAX."""
+    if T_MIN is not None or T_MAX is not None:
+        lo, hi = ax.get_xlim()
+        ax.set_xlim(T_MIN if T_MIN is not None else lo, T_MAX if T_MAX is not None else hi)
+
+
+def figura_comparativa(df_idx, casos, out, normalizar=False):
     """chi_out(t) de varias simulaciones en un mismo grafico (solo lineas),
     cada una con su chi nominal como linea discontinua del mismo color.
     casos: lista de sim_hash (se aceptan prefijos)."""
@@ -223,8 +243,6 @@ def figura_comparativa(df_idx, casos, out, normalizar=False, t_max=None):
             print(f"  [!] {h}: {info['status']} {info.get('detail', '')}")
             continue
         chi_nom = info['chi_nominal']
-        if t_max is not None:
-            d = d[d['tiempo'] <= t_max]
         y = d['chi_eff'] / chi_nom if normalizar else d['chi_eff']
         color = COLORES_CASOS[k % len(COLORES_CASOS)]
         _, _, nombre = estilo_sistema(row.get('system_type', ''))
@@ -239,21 +257,27 @@ def figura_comparativa(df_idx, casos, out, normalizar=False, t_max=None):
             seg = medir_segregacion(d, chi_nom)
             print(f"  {row['sim_hash']}: {nombre} chi={chi_nom:g}  desvio medio {100 * seg['desvio_medio_rel']:.1f} %"
                   f"  max {100 * seg['desvio_max_rel']:.1f} %  deriva {100 * seg['deriva_rel']:+.1f} %")
+    if not ax.lines:
+        plt.close(fig)
+        print("[!] Ningun caso tiene datos: no se guarda la figura.")
+        return
     ax.grid(False)
     ax.set_xlabel(r'Simulation Time (s)')
     ax.set_ylabel(r'$\chi_{out} / \chi$' if normalizar else r'Outflow Concentration $\chi_{out}$')
     ax.set_ylim(0, y_max * 1.15 if y_max > 0 else 1)
+    _xlim_intervalo(ax)
     ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1), borderaxespad=0, frameon=False)
     guardar_figura(out, fig)
     plt.close(fig)
     print(f"Figura: {out if os.path.splitext(out)[1] else out + '.' + FORMATO}")
 
 
-def _inicializar_worker(viejo, nuevo, ventana, formato):
+def _inicializar_worker(viejo, nuevo, ventana, formato, t_min=None, t_max=None):
     # los workers no heredan lo que main() cambia despues de importar el
     # modulo (con 'spawn' seguro, con 'fork' depende): se pasa explicito
-    global PREFIJO_VIEJO, PREFIJO_NUEVO, WINDOW_SIZE, FORMATO
+    global PREFIJO_VIEJO, PREFIJO_NUEVO, WINDOW_SIZE, FORMATO, T_MIN, T_MAX
     PREFIJO_VIEJO, PREFIJO_NUEVO, WINDOW_SIZE, FORMATO = viejo, nuevo, ventana, formato
+    T_MIN, T_MAX = t_min, t_max
 
 
 def _segregacion_fila(row):
@@ -283,7 +307,10 @@ def main():
                              "no genera las figuras por simulacion")
     parser.add_argument('--normalizar', action='store_true',
                         help="figura comparativa con chi_out / chi nominal (referencia en 1)")
-    parser.add_argument('--t_max', type=float, default=None, help="corta el eje de tiempo (s)")
+    parser.add_argument('--t_min', type=float, default=None,
+                        help="inicio del intervalo de tiempo (s); vale para todos los modos")
+    parser.add_argument('--t_max', type=float, default=None,
+                        help="fin del intervalo de tiempo (s); vale para todos los modos")
     parser.add_argument('--out', default=os.path.join(rutas.GRAFICOS_FINALES_DIR, 'chi_temporal_comparacion'),
                         help="figura comparativa (sin extension -> --formato)")
     parser.add_argument('--ranking', action='store_true',
@@ -301,20 +328,21 @@ def main():
 
     df_idx = pd.read_csv(args.index)
     # este proceso tambien usa las opciones (figura comparativa)
-    _inicializar_worker(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato)
+    _inicializar_worker(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato, args.t_min, args.t_max)
     if args.sistema:
         df_idx = df_idx[df_idx['system_type'].isin(args.sistema)]
     if args.chi:
         df_idx = df_idx[np.isclose(df_idx['chi'].to_numpy()[:, None], args.chi).any(axis=1)]
 
     if args.casos:
-        figura_comparativa(df_idx, args.casos, args.out, normalizar=args.normalizar, t_max=args.t_max)
+        figura_comparativa(df_idx, args.casos, args.out, normalizar=args.normalizar)
         return
 
     if args.ranking:
         tasks = [row for _, row in df_idx.iterrows()]
         with Pool(args.workers, initializer=_inicializar_worker,
-                  initargs=(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato)) as p:
+                  initargs=(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato,
+                            args.t_min, args.t_max)) as p:
             res = p.map(_segregacion_fila, tasks)
         r = pd.DataFrame([x for x in res if x is not None])
         if r.empty:
@@ -338,7 +366,8 @@ def main():
 
     tasks = [row for _, row in df_idx.iterrows()]
     with Pool(args.workers, initializer=_inicializar_worker,
-              initargs=(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato)) as p:
+              initargs=(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato,
+                            args.t_min, args.t_max)) as p:
         resultados = p.map(analizar_flujo_temporal, tasks)
 
     conteo = Counter(r['status'] for r in resultados)
