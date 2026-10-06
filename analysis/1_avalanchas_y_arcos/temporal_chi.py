@@ -342,6 +342,8 @@ def main():
                                    args.area_ratio).any(axis=1)]
     if args.sistema or args.chi or args.area_ratio:
         print(f"Filtros: quedan {len(df_idx)} simulaciones.")
+        if df_idx.empty:
+            raise SystemExit("Ninguna simulacion cumple los filtros (revisar --sistema / --chi / --area_ratio).")
 
     if args.casos:
         figura_comparativa(df_idx, args.casos, args.out, normalizar=args.normalizar)
