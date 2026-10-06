@@ -318,6 +318,8 @@ def main():
     parser.add_argument('--sistema', nargs='+', default=None,
                         help="filtra system_type (ej. Disco-Disco Cuad-Disco)")
     parser.add_argument('--chi', type=float, nargs='+', default=None, help="filtra chi nominal")
+    parser.add_argument('--area_ratio', type=float, nargs='+', default=None,
+                        help="filtra area_ratio_nominal (relacion de areas chico/grande, ej. 0.1)")
     args = parser.parse_args()
     if (args.prefijo_viejo is None) != (args.prefijo_nuevo is None):
         raise SystemExit("--prefijo_viejo y --prefijo_nuevo van juntos.")
@@ -333,6 +335,13 @@ def main():
         df_idx = df_idx[df_idx['system_type'].isin(args.sistema)]
     if args.chi:
         df_idx = df_idx[np.isclose(df_idx['chi'].to_numpy()[:, None], args.chi).any(axis=1)]
+    if args.area_ratio:
+        if 'area_ratio_nominal' not in df_idx.columns:
+            raise SystemExit("El index no tiene area_ratio_nominal: volve a correr indexer.py.")
+        df_idx = df_idx[np.isclose(df_idx['area_ratio_nominal'].to_numpy(float)[:, None],
+                                   args.area_ratio).any(axis=1)]
+    if args.sistema or args.chi or args.area_ratio:
+        print(f"Filtros: quedan {len(df_idx)} simulaciones.")
 
     if args.casos:
         figura_comparativa(df_idx, args.casos, args.out, normalizar=args.normalizar)
