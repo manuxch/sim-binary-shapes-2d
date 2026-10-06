@@ -264,9 +264,11 @@ def figura_comparativa(df_idx, casos, out, normalizar=False):
     ax.grid(False)
     ax.set_xlabel(r'Simulation Time (s)')
     ax.set_ylabel(r'$\chi_{out} / \chi$' if normalizar else r'Outflow Concentration $\chi_{out}$')
-    ax.set_ylim(0, y_max * 1.15 if y_max > 0 else 1)
+    # margen arriba para que la leyenda (adentro) no tape las curvas
+    n_casos = len(ax.get_legend_handles_labels()[1])
+    ax.set_ylim(0, y_max * (1.2 + 0.12 * n_casos) if y_max > 0 else 1)
     _xlim_intervalo(ax)
-    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1), borderaxespad=0, frameon=False)
+    ax.legend(loc='upper right')
     guardar_figura(out, fig)
     plt.close(fig)
     print(f"Figura: {out if os.path.splitext(out)[1] else out + '.' + FORMATO}")
