@@ -20,7 +20,7 @@ NOMBRE_COLORMAP = 'inferno'
 # mismo color (el grosor sigue siendo proporcional a la fuerza); solo el arco
 # se destaca.
 COLOR_RELLENO_GRANO = '#DCE3EA'   # gris azulado claro
-COLOR_BORDE_GRANO = '#AAB4BF'
+COLOR_BORDE_GRANO = '#7F8C99'
 COLOR_FUERZA = '#4D4D4D'          # gris oscuro
 COLOR_ARCO_RELLENO = '#FFC864'    # naranja suave
 COLOR_ARCO_LINEA = 'blue'
@@ -47,6 +47,7 @@ def parse_xy(filename):
             p = line.split()
             if not p: continue
             pid = int(p[0])
+            if pid < 0: continue  # paredes/piso del silo (cadena de segmentos), no son granos
             n_sides = int(p[1])
             if n_sides == 1: # DISCO
                 x, y, r, ptype = float(p[2]), float(p[3]), float(p[4]), int(p[5])
@@ -182,7 +183,7 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg')
     fig, ax = plt.subplots(figsize=(10, 10 * ratio))
 
     # 1. Dibujar Partículas (Fondo)
-    fc, ec, lw_borde = (COLOR_RELLENO_GRANO, COLOR_BORDE_GRANO, 0.4) if simple else ('none', '#CCCCCC', 0.3)
+    fc, ec, lw_borde = (COLOR_RELLENO_GRANO, COLOR_BORDE_GRANO, 0.6) if simple else ('none', '#CCCCCC', 0.3)
     for pid, p in particles.items():
         if p['shape'] == 'Disco':
             ax.add_patch(Circle(p['pos'], p['r'], fc=fc, ec=ec, lw=lw_borde, zorder=1))
