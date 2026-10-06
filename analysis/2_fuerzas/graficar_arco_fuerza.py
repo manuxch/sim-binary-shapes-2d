@@ -16,6 +16,15 @@ mpl.rcParams['svg.fonttype'] = 'none'
 ESCALA_GROSOR_FUERZA = 0.8  
 NOMBRE_COLORMAP = 'inferno' 
 
+# Estilo 'simple': granos rellenos con un color suave y todas las fuerzas del
+# mismo color (el grosor sigue siendo proporcional a la fuerza); solo el arco
+# se destaca.
+COLOR_RELLENO_GRANO = '#DCE3EA'   # gris azulado claro
+COLOR_BORDE_GRANO = '#AAB4BF'
+COLOR_FUERZA = '#4D4D4D'          # gris oscuro
+COLOR_ARCO_RELLENO = '#FFC864'    # naranja suave
+COLOR_ARCO_LINEA = 'blue'
+
 # =============================================================================
 # FUNCIONES DE PARSEO Y DETECCIÓN
 # =============================================================================
@@ -106,7 +115,10 @@ def detectar_arco_primario(G, particles, params):
 # =============================================================================
 # GENERACIÓN DE IMAGEN
 # =============================================================================
-def graficar_arco_y_fuerzas(sim_folder, jam_id):
+def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg'):
+    """estilo='fuerzas': fuerzas coloreadas con inferno, granos sin relleno (original).
+    estilo='simple': granos rellenos con un color suave, fuerzas de un solo color."""
+    simple = (estilo == 'simple')
     frames_dir = glob.glob(os.path.join(sim_folder, "frames_*"))
     if not frames_dir: 
         print(f"Error: No se encontró carpeta 'frames_' en {sim_folder}")
@@ -170,21 +182,27 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id):
     fig, ax = plt.subplots(figsize=(10, 10 * ratio))
 
     # 1. Dibujar Partículas (Fondo)
+    fc, ec, lw_borde = (COLOR_RELLENO_GRANO, COLOR_BORDE_GRANO, 0.4) if simple else ('none', '#CCCCCC', 0.3)
     for pid, p in particles.items():
         if p['shape'] == 'Disco':
-            ax.add_patch(Circle(p['pos'], p['r'], color='none', ec='#CCCCCC', lw=0.3, zorder=1))
+            ax.add_patch(Circle(p['pos'], p['r'], fc=fc, ec=ec, lw=lw_borde, zorder=1))
         else:
-            ax.add_patch(pltPolygon(p['coords'], color='none', ec='#CCCCCC', lw=0.3, zorder=1))
+            ax.add_patch(pltPolygon(p['coords'], fc=fc, ec=ec, lw=lw_borde, zorder=1))
 
     # 2. Dibujar Arco Detectado (Resaltado)
     if arco_path:
         for pid in arco_path:
             p = particles[pid]
-            c = 'orange' if p['type'] == 0 else 'lightgreen'
-            if p['shape'] == 'Disco':
-                ax.add_patch(Circle(p['pos'], p['r'], color=c, alpha=0.5, ec='blue', lw=2, zorder=2))
+            if simple:
+                # opaco: si no, se mezcla con el relleno de fondo
+                kw = dict(fc=COLOR_ARCO_RELLENO, ec=COLOR_ARCO_LINEA, lw=2, zorder=2)
             else:
-                ax.add_patch(pltPolygon(p['coords'], color=c, alpha=0.5, ec='blue', lw=2, zorder=2))
+                c = 'orange' if p['type'] == 0 else 'lightgreen'
+                kw = dict(color=c, alpha=0.5, ec='blue', lw=2, zorder=2)
+            if p['shape'] == 'Disco':
+                ax.add_patch(Circle(p['pos'], p['r'], **kw))
+            else:
+                ax.add_patch(pltPolygon(p['coords'], **kw))
         
         # -------------------------------------------------------------
         # NUEVO: Trazar la línea del arco cruzando por los puntos de contacto
@@ -209,12 +227,12 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id):
             arch_y.append(particles[v]['pos'][1])
             
         # Dibujamos la línea azul principal quebrada
-        ax.plot(arch_x, arch_y, color='blue', lw=3.5, zorder=5, alpha=0.6, solid_capstyle='round')
+        ax.plot(arch_x, arch_y, color=COLOR_ARCO_LINEA, lw=3.5, zorder=5, alpha=0.6, solid_capstyle='round')
         
         # Agregamos un marcador redondo SOLO en los centros (queda más prolijo)
         cx = [particles[pid]['pos'][0] for pid in arco_path]
         cy = [particles[pid]['pos'][1] for pid in arco_path]
-        ax.scatter(cx, cy, color='blue', s=40, zorder=6)
+        ax.scatter(cx, cy, color=COLOR_ARCO_LINEA, s=40, zorder=6)
 
     # 3. Dibujar Fuerzas (también pasando por el punto de contacto promediado)
     f_max_scale = grouped_contacts['f_norm'].quantile(0.95) if not grouped_contacts.empty else 1.0
@@ -231,7 +249,7 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id):
             f_val = row['f_norm']
             
             ax.plot([pos_a[0], px, pos_b[0]], [pos_a[1], py, pos_b[1]], 
-                    color=cmap(norm(f_val)), 
+                    color=COLOR_FUERZA if simple else cmap(norm(f_val)), 
                     lw=f_val * ESCALA_GROSOR_FUERZA, 
                     solid_capstyle='round', alpha=0.85, zorder=4)
 
@@ -246,8 +264,9 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id):
     ax.set_aspect('equal')
     ax.axis('off')
 
-    output_path = os.path.join(frames_dir, '..', f'arco_y_fuerzas_contacto_{jam_id}.svg')
-    fig.savefig(output_path, format='svg', bbox_inches='tight', transparent=False)
+    sufijo = '_simple' if simple else ''
+    output_path = os.path.join(frames_dir, '..', f'arco_y_fuerzas_contacto_{jam_id}{sufijo}.{formato}')
+    fig.savefig(output_path, format=formato, bbox_inches='tight', transparent=False, dpi=300)
     plt.close(fig)
     print(f"✅ Imagen guardada con éxito en:\n   {output_path}")
 
@@ -255,7 +274,14 @@ if __name__ == "__main__":
     import sys
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # rutas.py vive en analysis/
     import rutas
-    CARPETA_SIMULACION = os.path.join(rutas.SIM_DATA_DIR, "BARRIDO_WIDTHS_DISK_DISK", "Chi_0p0_W_2p0")
-    ID_DEL_ATASCO = "00095" 
-    
-    graficar_arco_y_fuerzas(CARPETA_SIMULACION, ID_DEL_ATASCO)
+    import argparse
+    ap = argparse.ArgumentParser(description="Atasco con red de fuerzas y arco detectado.")
+    ap.add_argument('--sim', default=os.path.join(rutas.SIM_DATA_DIR, "BARRIDO_WIDTHS_DISK_DISK", "Chi_0p0_W_2p0"),
+                    help="carpeta de la simulacion (la que tiene params.in y frames_*)")
+    ap.add_argument('--jam_id', nargs='+', default=["00095"], help="uno o varios ids (00095 o 95)")
+    ap.add_argument('--estilo', choices=['fuerzas', 'simple'], default='fuerzas',
+                    help="fuerzas: colormap inferno (original); simple: granos rellenos y fuerzas de un color")
+    ap.add_argument('--formato', default='svg', help="svg, pdf o png")
+    args = ap.parse_args()
+    for j in args.jam_id:
+        graficar_arco_y_fuerzas(args.sim, f"{int(j):05d}", estilo=args.estilo, formato=args.formato)
