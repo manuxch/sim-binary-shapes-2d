@@ -3,8 +3,15 @@
 """
 Correlacion entre el tamano medio de avalancha <s> y la presion media <P>
 de los atascos, un punto por simulacion (sistema, chi, razon de areas,
-orificio). Color y marcador por sistema; los puntos de un mismo sistema se
-unen en orden de chi.
+orificio).
+
+Figura (por defecto): un panel por sistema; el color de cada punto es chi
+(barra de color). Se usa un solo orificio W (el _W_ de la carpeta, --W,
+default 2.0), para que <s> sea comparable; si aun quedan varias familias
+(distinto Radio_salida), cada una tiene su marcador. Solo se unen con una linea
+los puntos de una misma familia, en orden de chi. Eje y logaritmico (<s> va
+de ~1 a cientos); --liny para lineal. --un_panel: todos los sistemas en un
+mismo panel, color por sistema (la version anterior).
 
   <s>  media de 'tamano_big' (granos grandes por avalancha, la misma <s> de
        graficos_finales.py) o de 'total_mix' (--s total), sobre todas las
@@ -23,17 +30,18 @@ La simulacion se empareja por las dos ultimas carpetas de la ruta
 calcularon con el disco montado en rutas distintas.
 
 Salida (en processed_data/5_graficos_finales/ por defecto):
-  16-s-vs-P-<region>-ratio-<r>.pdf  y  ..._datos.csv con los valores graficados.
-En la leyenda: coeficiente de Pearson r de cada sistema; en el titulo de
-la leyenda, el de todos los puntos juntos.
+  16-s-vs-P-<region>-ratio-<r>-W-<W>.pdf  y  ..._datos.csv con los valores graficados.
+Coeficiente de Pearson r de cada sistema en el titulo de su panel (con
+eje y log, r se calcula con log<s>).
 
 Uso:
     python3 analysis/3_presion_y_mapas/correlacion_s_vs_P.py \\
         --presion processed_data/presion/tensor_nuevo/resumen_presion_por_atasco.csv
-    python3 analysis/3_presion_y_mapas/correlacion_s_vs_P.py --region roi --area_ratio 0.1 --logy
+    python3 analysis/3_presion_y_mapas/correlacion_s_vs_P.py --region roi --W 2.0 --radio_salida 1.0
 """
 import argparse
 import os
+import re
 import sys
 
 import matplotlib
@@ -56,6 +64,15 @@ ETIQUETA_Y = {'big': r'Mean Avalanche Size $\langle s \rangle$',
               'total': r'Mean Avalanche Size $\langle s \rangle$ (all grains)'}
 COLUMNA_S = {'big': 'tamano_big', 'total': 'total_mix'}
 NOMBRE_REGION = {'arco': 'arch', 'roi': 'ROI', 'bulk': 'bulk'}
+
+
+W_REGEX = re.compile(r'_W_([0-9]+(?:p[0-9]+)?)')
+MARCADORES = ['o', 's', '^', 'D', 'v', 'p', 'h', '<', '>']
+
+
+def ancho_W(clave):
+    m = W_REGEX.search(str(clave))
+    return float(m.group(1).replace('p', '.')) if m else np.nan
 
 
 def clave_carpeta(ruta):
@@ -115,6 +132,69 @@ def agregar_puros(df):
     return pd.concat([mezclas] + extra, ignore_index=True) if len(mezclas) else df
 
 
+def pearson(x, y, logy):
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    if logy:
+        ok = y > 0
+        x, y = x[ok], np.log(y[ok])
+    return np.corrcoef(x, y)[0, 1] if len(x) > 2 else np.nan
+
+
+def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_max):
+    from matplotlib.colors import Normalize
+    from matplotlib.cm import ScalarMappable
+    aplicar_estilo()
+    sistemas = sorted(df['sistema'].unique(), key=lambda s: (s != 'Disco(G)-Disco(C)', s))
+    ncol = 2 if len(sistemas) > 1 else 1
+    nfil = int(np.ceil(len(sistemas) / ncol))
+    fig, axes = plt.subplots(nfil, ncol, figsize=(6.2 * ncol, 4.6 * nfil), sharex=True, sharey=True,
+                             squeeze=False)
+    norm, cmap = Normalize(0, chi_max), plt.cm.viridis
+    familias = sorted(df[['Radio_salida', 'W']].drop_duplicates().itertuples(index=False, name=None),
+                      key=lambda t: (np.nan_to_num(t[0]), np.nan_to_num(t[1])))
+    marcador = {f: MARCADORES[i % len(MARCADORES)] for i, f in enumerate(familias)}
+    vistos = set()
+    for ax, sis in zip(axes.flat, sistemas):
+        sub = df[df['sistema'] == sis]
+        for fam, g in sub.groupby(['Radio_salida', 'W'], dropna=False):
+            fam = tuple(fam)
+            g = g.sort_values('chi')
+            m = marcador.get(fam, 'o')
+            ax.plot(g['P'], g['s'], color='0.65', lw=0.9, zorder=1)
+            if error:
+                ax.errorbar(g['P'], g['s'], xerr=g['P_sem'], yerr=g['s_sem'], fmt='none', ecolor='0.55',
+                            elinewidth=0.8, capsize=2, zorder=2)
+            lbl = None
+            if len(familias) > 1 and fam not in vistos:
+                lbl = f"$R_{{out}}$ = {fam[0]:g}, W = {fam[1]:g}"
+                vistos.add(fam)
+            ax.scatter(g['P'], g['s'], c=g['chi'], cmap=cmap, norm=norm, marker=m, s=55,
+                       edgecolors='black', linewidths=0.6, zorder=3, label=lbl)
+        r = pearson(sub['P'], sub['s'], logy)
+        etiqueta = estilo_sistema(sis)[2]
+        ax.set_title(f"{etiqueta}  ($r$ = {r:.2f})" if np.isfinite(r) else etiqueta, fontsize='medium')
+        if logx:
+            ax.set_xscale('log')
+        if logy:
+            from matplotlib.ticker import ScalarFormatter, NullFormatter
+            ax.set_yscale('log')
+            ax.yaxis.set_major_formatter(ScalarFormatter())
+            ax.yaxis.set_minor_formatter(NullFormatter())
+    for ax in axes.flat[len(sistemas):]:
+        ax.set_visible(False)
+    for ax in axes[-1, :]:
+        ax.set_xlabel(f"{ETIQUETA_X[magnitud]} ({NOMBRE_REGION[region]})")
+    for ax in axes[:, 0]:
+        ax.set_ylabel(ETIQUETA_Y[tipo_s])
+    if len(familias) > 1:
+        fig.legend(loc='lower center', ncol=min(len(familias), 4), frameon=False, fontsize='small',
+                   bbox_to_anchor=(0.45, -0.02))
+    fig.tight_layout(rect=(0, 0.05 if len(familias) > 1 else 0, 0.9, 1))
+    cax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+    fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cax, label=r'$\chi$')
+    return guardar_figura(out, fig)
+
+
 def graficar(df, out, magnitud, region, tipo_s, logx, logy, error):
     aplicar_estilo()
     fig, ax = plt.subplots(figsize=(7.5, 5.5))
@@ -158,11 +238,15 @@ def main():
                     help="system_type del indice (ej. Disco-Disco Cuad-Disco); por defecto todos")
     ap.add_argument('--solo_con_arco', action='store_true',
                     help='solo avalanchas que terminaron en un atasco guardado (con arco)')
+    ap.add_argument('--W', type=float, default=2.0,
+                    help='orificio W de la carpeta (_W_2p0 -> 2.0, default); un solo orificio por figura')
     ap.add_argument('--logx', action='store_true')
-    ap.add_argument('--logy', action='store_true')
+    ap.add_argument('--liny', action='store_true', help='eje y lineal (por defecto logaritmico)')
+    ap.add_argument('--un_panel', action='store_true',
+                    help='todos los sistemas en un mismo panel, color por sistema')
     ap.add_argument('--sin_error', action='store_true', help='sin barras de error')
     ap.add_argument('--out', default=None,
-                    help='pdf de salida (default: 5_graficos_finales/16-s-vs-<P|tau>-<region>-ratio-<r>.pdf)')
+                    help='pdf de salida (default: 5_graficos_finales/16-s-vs-<P|tau>-<region>-ratio-<r>-W-<W>.pdf)')
     args = ap.parse_args()
 
     pres = presion_por_simulacion(args.presion, args.magnitud, args.region)
@@ -176,29 +260,36 @@ def main():
     if 'area_ratio_nominal' in df.columns and args.area_ratio is not None:
         df = df[np.isclose(df['area_ratio_nominal'].fillna(1.0), args.area_ratio, atol=1e-3)
                 | (df['chi'] == 0)]
+    df['W'] = df['clave'].map(ancho_W)
     if args.radio_salida is not None:
         df = df[np.isclose(df['Radio_salida'], args.radio_salida)]
+    df = df[np.isclose(df['W'], args.W)]
     df = df[df['chi'] <= args.chi_max]
     if args.sistemas:
         df = df[df['system_type'].isin(args.sistemas)]
     df = df.dropna(subset=['P', 's'])
     df = agregar_puros(df)
     if df.empty:
-        sys.exit("[!] No quedo ninguna simulacion despues de filtrar (--area_ratio, --radio_salida, --chi_max).")
+        sys.exit("[!] No quedo ninguna simulacion despues de filtrar (--W, --area_ratio, --radio_salida, --chi_max).")
     df['sistema'] = df['system_type'].map(lambda s: SYSTEM_NAME_MAP.get(str(s), str(s)))
 
     out = args.out or os.path.join(
         rutas.GRAFICOS_FINALES_DIR,
-        f"16-s-vs-{args.magnitud}-{args.region}-ratio-{args.area_ratio:g}.pdf")
+        f"16-s-vs-{args.magnitud}-{args.region}-ratio-{args.area_ratio:g}-W-{args.W:g}.pdf")
     datos = os.path.splitext(out)[0] + '_datos.csv'
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
-    cols = ['sistema', 'chi', 'area_ratio_nominal', 'Radio_salida', 'clave', 'P', 'P_sem', 'n_atascos',
+    cols = ['sistema', 'chi', 'area_ratio_nominal', 'Radio_salida', 'W', 'clave', 'P', 'P_sem', 'n_atascos',
             's', 's_sem', 'n_avalanchas']
     df.sort_values(['sistema', 'chi'])[[c for c in cols if c in df.columns]].to_csv(datos, index=False)
-    print("Puntos por sistema (chi):")
-    for sis, g in df.groupby('sistema'):
-        print(f"  {sis:20s} {sorted(g['chi'].round(3).tolist())}")
-    path = graficar(df, out, args.magnitud, args.region, args.s, args.logx, args.logy, not args.sin_error)
+    print("Puntos por sistema y familia (Radio_salida, W): valores de chi")
+    for (sis, rs, w), g in df.groupby(['sistema', 'Radio_salida', 'W'], dropna=False):
+        print(f"  {sis:20s} R_out={rs:<5g} W={w:<5g} chi={sorted(g['chi'].round(3).tolist())}")
+    if args.un_panel:
+        path = graficar(df, out, args.magnitud, args.region, args.s, args.logx, not args.liny,
+                        not args.sin_error)
+    else:
+        path = graficar_paneles(df, out, args.magnitud, args.region, args.s, args.logx, not args.liny,
+                                not args.sin_error, args.chi_max)
     print(f"Figura: {path}\nDatos:  {datos}")
 
 
