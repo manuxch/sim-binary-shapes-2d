@@ -156,7 +156,7 @@ def plot_puros_vs_orificio(df: pd.DataFrame):
         fmt='o-', color='black', label='Pure Disks', **ERRORBAR_KW
     )
     plt.xlabel(r"Orifice Ratio $(D/d)^2$")
-    plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
+    plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
     plt.legend(title="System")
     save_plot("1-pure-vs-orifice")
 
@@ -199,7 +199,7 @@ def plot_disco_vs_area_ratio(df: pd.DataFrame):
         )
 
     plt.xlabel(r"Nominal Area Ratio $R_a$")
-    plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
+    plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
 
     plt.legend(loc='best')
 
@@ -332,7 +332,7 @@ def plot_sweeps_by_system(
                          label=rf"$R_a = {chosen:.3g}$", **ERRORBAR_KW)
 
         plt.xlabel(r"Concentration $\chi$")
-        plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
+        plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
         plt.legend(loc='upper left')
         plt.xlim(*x_range)
         plt.ylim(*y_range)
@@ -388,7 +388,7 @@ def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15):
             )
 
         plt.xlabel(r"Concentration $\chi$")
-        plt.ylabel(r"$\ln(\langle S \rangle / \langle S_0 \rangle + 1)$")
+        plt.ylabel(r"$\ln(\langle s \rangle / \langle s_0 \rangle + 1)$")
         plt.ylim(0.4, 2.5)
         plt.legend(loc='upper left')
         save_plot(filename)
@@ -428,7 +428,7 @@ def plot_geometric_effects_raw(df: pd.DataFrame, target_ar: float = 0.15):
         )
 
     plt.xlabel(r"Concentration $\chi$")
-    plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
+    plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
     plt.ylim(2.2, 6.5)
     plt.legend()
     save_plot("5c-matrix-raw-log")
@@ -466,7 +466,7 @@ def plot_geometric_effects_linear(df: pd.DataFrame, target_ar: float = 0.15):
             )
 
         plt.xlabel(r"Concentration $\chi$")
-        plt.ylabel(r"Mean Size $\langle S \rangle$")
+        plt.ylabel(r"Mean Size $\langle s \rangle$")
         plt.legend(loc='upper left')
         save_plot(filename)
 
@@ -569,7 +569,7 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
             anotar_chi(ax_box, target_chi)
             plt.xlabel(None)
             plt.yscale('log')
-            plt.ylabel(r"Avalanche Size $S$")
+            plt.ylabel(r"Avalanche Size $s$")
             save_plot(f"10-avalanche-boxplot-chi-{target_chi}")
 
 
