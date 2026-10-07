@@ -1,0 +1,30 @@
+#!/bin/bash
+# git pushsync [args de git push]       (instalar: cp setup/git-pushsync ~/bin/)
+# 1) git push; si falla, no hace nada mas.
+# 2) Copia el codigo versionado (HEAD, sin .git) a la carpeta de Windows
+#    $PROYECTO_WIN, borrando alli los archivos que dejaron de estar versionados.
+# 3) Copia a Windows los datos ignorados por git que se generaron en WSL
+#    (los enlaces simbolicos ya apuntan a Windows y se saltean).
+set -euo pipefail
+git push "$@"
+
+REPO=$(git rev-parse --show-toplevel)
+DEST="${PROYECTO_WIN:?Defini PROYECTO_WIN en ~/.bashrc}"
+cd "$REPO"
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+
+git archive HEAD | tar -x -C "$TMP"
+git ls-tree -r --name-only HEAD | sort > "$TMP/.versionados.txt"
+if [ -f "$DEST/.versionados.txt" ]; then
+    comm -23 "$DEST/.versionados.txt" "$TMP/.versionados.txt" |
+        while IFS= read -r f; do rm -f "$DEST/$f"; done
+fi
+rsync -rt "$TMP"/ "$DEST"/
+git log -1 --format='%H%n%cd%n%s' > "$DEST/VERSION.txt"
+
+git ls-files -z -o -i --exclude-standard --directory |
+    { grep -zvE '(^|/)(venv|__pycache__|\.ipynb_checkpoints)/?$|^simulation/(bin|obj)/?$' || true; } |
+    while IFS= read -r -d '' p; do [ -L "${p%/}" ] || printf '%s\0' "$p"; done |
+    rsync -rt --from0 --files-from=- ./ "$DEST"/
+
+echo "Sincronizado con $DEST  ($(git rev-parse --short HEAD))"

@@ -70,6 +70,20 @@ Todas las rutas salen de `analysis/rutas.py`, que las calcula a partir de dónde
 - **Otro contenedor de Apptainer** (scripts `.sh`): `export CONTENEDOR=/ruta/al/contenedor.sif`.
 - **gnuplot** (`analysis/4_correlaciones_gnuplot/`): correrlo desde cualquier carpeta dentro del repo; la raíz la toma de `git rev-parse --show-toplevel`.
 
+## Configuración en una PC nueva (WSL + datos en Windows / Google Drive)
+
+El repo se clona en WSL; los datos pesados viven en Windows (y Google Drive los sube a la nube) y se ven desde el repo con enlaces simbólicos:
+
+```bash
+git clone https://github.com/montero-j/sim-binary-shapes-2d.git ~/work/lab/project/sim-binary-shapes-2d
+cd ~/work/lab/project/sim-binary-shapes-2d
+export PROYECTO_WIN="/mnt/c/Users/<usuario>/work/lab/project/sim-binary-shapes-2d"   # carpeta del proyecto en Windows
+bash setup/enlazar_datos.sh "$PROYECTO_WIN"          # enlaza datos_simulaciones, csv, parquet...
+mkdir -p ~/bin && cp setup/git-pushsync ~/bin/       # 'git pushsync' = push + copia del código a Windows
+```
+
+`PROYECTO_WIN` y `export PATH="$HOME/bin:$PATH"` van en `~/.bashrc`. Después de cada commit, `git pushsync` en lugar de `git push`.
+
 ## Notas
 
 - `migrar_datos_locales.sh`: correrlo una vez después del pull de la reorganización para recuperar los archivos pesados y acomodar los datos locales.
