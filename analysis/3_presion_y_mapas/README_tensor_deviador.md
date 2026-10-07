@@ -265,6 +265,26 @@ Mide, por tipo de grano (discos / polígonos / que tocan pared): el residuo del 
 
 Sobre τ > P en ~5 % de los granos (discos): no es un error. Un contacto con fricción ya genera en el tensor del grano un esfuerzo principal levemente negativo (∝ ½[fn ± √(fn² + ft²)]), así que granos con pocos contactos y mucha fricción movilizada pueden tener τ algo mayor que P.
 
+### Verificación de σxy y τ — `analysis/utils/verificar_tensor.py`
+
+Prueba independiente de la parte fuera de la diagonal y del deviador, con la misma función `calcular_tensor_y_presion_vectorizado()`:
+
+```bash
+python analysis/utils/verificar_tensor.py --sintetico                          # casos con resultado conocido
+python analysis/utils/verificar_tensor.py --sim_path <simulacion> --jam_id 1 2 # rota un atasco real
+python analysis/utils/verificar_tensor.py --parquet <out>/presion_por_particula_Disco.parquet --incluir 'Chi_0p2_W_2p0'
+```
+
+| Prueba | Qué confirma |
+|---|---|
+| Disco comprimido a lo largo de u | $\sigma = (2F/A)\,u u^T$: compresión a lo largo de y = x da σxy > 0; P = τ = F/A. |
+| Corte puro con tangenciales (disco y cuadrado) | σxy = −2T/A y τ = 2T/A: la tangencial entra con el signo correcto. |
+| Dos discos en contacto | La 3ª ley (fuerza −F_A sobre B) da el mismo tensor en los dos granos. |
+| Rotación (al azar y atasco real) | P y τ no cambian; σ rota como $R\sigma R^T$. |
+| Espejo y paredes (datos) | σxy(−x) = −σxy(x); junto a las paredes, σxy > 0 a la izquierda y < 0 a la derecha (las paredes sostienen peso por fricción, efecto Janssen), con \|σxy\|/σxx ≤ fricción de la pared. |
+
+Las pruebas sintéticas dan error relativo < 1e-6 (2026-10-07).
+
 ### Pendientes
 
 1. **Clasificación grande/chico (líneas 563, 580, 502).** Se compara el **inradio** de los polígonos (`r_eff·cos(π/n)`) con un umbral armado con `r_large`/`r_small` del índice. Si esos radios no están en la misma definición (circunradio o radio de igual área), un polígono grande puede quedar como "S" cuando los tamaños son parecidos. Ejemplo con radios de igual área: un triángulo grande equivalente a un disco de r = 0.5 tiene inradio ≈ 0.39; con un disco chico de r = 0.32 (ratio de áreas 0.4) el umbral es ≈ 0.41, así que el triángulo quedaría como chico. Alternativa sin umbral: usar la columna `tipo` del `.xy`, que es la especie exacta de cada grano.
