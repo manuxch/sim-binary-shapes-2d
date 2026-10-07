@@ -28,10 +28,15 @@ siguiente. Por eso s_tt, s_nn, s_tn son aproximados en arcos muy plegados.
 P no depende de los ejes (es la traza), asi que sigma_xy NO cambia P: el
 estres fuera de la diagonal aparece en tau, en s1/s2 y en s_tt/s_nn.
 
+Con --pdf ademas guarda una figura: P, s1 y s2 por region (arco, ROI,
+bulk) para cada forma, con barras de error = error estandar entre atascos.
+
 Uso:
     python3 estres_arco_vs_roi.py --parquet <out>/presion_por_particula_Cuadrado.parquet \\
         --incluir 'Ratio_0p1_Chi_0p2_W_2p0'
     (se puede pasar mas de un parquet: una tabla por archivo)
+    python3 estres_arco_vs_roi.py --parquet <out>/presion_por_particula_*.parquet \\
+        --incluir 'Ratio_0p1_Chi_0p2_W_2p0' --pdf estres_arco_vs_roi.pdf
 """
 import argparse
 import os
@@ -89,11 +94,28 @@ def resumen(df, nombre):
     return fila
 
 
+def por_atasco(sub):
+    """P, s1, s2 de la region en cada atasco (pesados por area): media y error estandar entre atascos."""
+    P, tau = invariantes(sub['sigma_xx_reducida'].to_numpy(float), sub['sigma_yy_reducida'].to_numpy(float),
+                         sub['sigma_xy_reducida'].to_numpy(float))
+    d = pd.DataFrame({'k': list(zip(sub['sim_path'], sub['jam_id'])), 'w': sub['area'].to_numpy(float),
+                      'P': P * sub['area'].to_numpy(float), 's1': (P + tau) * sub['area'].to_numpy(float),
+                      's2': (P - tau) * sub['area'].to_numpy(float)})
+    g = d.groupby('k').sum()
+    out = {}
+    for c in ('P', 's1', 's2'):
+        v = g[c] / g['w']
+        out[c] = (float(v.mean()), float(v.std(ddof=1) / np.sqrt(len(v))) if len(v) > 1 else 0.0)
+    return out
+
+
 def analizar(path, incluir):
     df = leer(path, incluir)
     if df.empty:
         print(f"\n[!] {os.path.basename(path)}: ninguna fila coincide con --incluir")
-        return
+        sims = leer_sims(path)
+        print(f"    simulaciones en el archivo (sim_path, primeras 10): {sims[:10]}")
+        return None
     print(f"\n== {os.path.basename(path)}  ({df.groupby(['sim_path', 'jam_id']).ngroups} atascos, "
           f"{df['sim_path'].nunique()} simulaciones)")
     filas = []
@@ -110,9 +132,11 @@ def analizar(path, incluir):
         print("   Promedios pesados por area (unidades reducidas, /g):")
         print(tabla.to_string())
 
+    figura = {reg: por_atasco(df[df['region'] == reg]) for reg in ('arco', 'roi', 'bulk')
+              if (df['region'] == reg).any()}
     arco = df[df['region'] == 'arco'].reset_index(drop=True)
     if len(arco) < 2:
-        return
+        return figura
     t = ejes_arco(arco)
     n = np.stack([-t[:, 1], t[:, 0]], 1)
     S = np.stack([[arco.sigma_xx_reducida, arco.sigma_xy_reducida],
@@ -130,17 +154,59 @@ def analizar(path, incluir):
           f"s_tn (corte) = {m(np.abs(s_tn)):.3f}")
     print(f"   angulo entre s1 y la tangente: mediana {np.median(ang):.0f} grados, "
           f"{100 * np.mean(ang < 30):.0f} % de los granos con menos de 30 grados")
+    return figura
+
+
+def leer_sims(path):
+    import pyarrow.dataset as ds
+    import pyarrow.compute as pc
+    t = ds.dataset(path).to_table(columns=['sim_path'])
+    return sorted(set(os.path.basename(str(x)) for x in pc.unique(t['sim_path']).to_pylist()))
+
+
+def graficar(datos, salida, titulo):
+    import matplotlib.pyplot as plt
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from estilo_figuras import aplicar_estilo, estilo_forma, guardar_figura, REGION_STYLE, ERRORBAR_KW
+    aplicar_estilo()
+    colores = {'arco': REGION_STYLE['arco'], 'roi': REGION_STYLE['roi'], 'bulk': ('#999999', 'Bulk')}
+    formas = list(datos)
+    paneles = (('P', r'$P/g$'), ('s1', r'$\sigma_1/g$'), ('s2', r'$\sigma_2/g$'))
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.5), sharey=False)
+    ancho = 0.26
+    x = np.arange(len(formas))
+    for ax, (clave, etiqueta) in zip(axes, paneles):
+        for k, reg in enumerate(('arco', 'roi', 'bulk')):
+            vals = [datos[f].get(reg, {}).get(clave, (np.nan, 0.0)) for f in formas]
+            ax.bar(x + (k - 1) * ancho, [v[0] for v in vals], ancho, yerr=[v[1] for v in vals],
+                   color=colores[reg][0], label=colores[reg][1], **ERRORBAR_KW)
+        ax.set_xticks(x)
+        ax.set_xticklabels([estilo_forma(f)[0] for f in formas])
+        ax.set_ylabel(etiqueta)
+    axes[0].legend(frameon=False)
+    if titulo:
+        fig.suptitle(titulo)
+    fig.tight_layout()
+    print(f"\nFigura: {guardar_figura(salida, fig)}")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--parquet', nargs='+', required=True, help='presion_por_particula_<Forma>.parquet')
     ap.add_argument('--incluir', default=None, help='regex sobre sim_path (ej. Ratio_0p1_Chi_0p2_W_2p0)')
+    ap.add_argument('--pdf', default=None, help='guarda la figura P, s1, s2 por region y forma')
+    ap.add_argument('--titulo', default=None)
     args = ap.parse_args()
+    datos = {}
     for p in args.parquet:
         if not os.path.exists(p):
             sys.exit(f"[!] No existe {p}")
-        analizar(p, args.incluir)
+        r = analizar(p, args.incluir)
+        if r:
+            forma = os.path.basename(p).replace('presion_por_particula_', '').replace('.parquet', '')
+            datos[forma] = r
+    if args.pdf and datos:
+        graficar(datos, args.pdf, args.titulo)
 
 
 if __name__ == '__main__':
