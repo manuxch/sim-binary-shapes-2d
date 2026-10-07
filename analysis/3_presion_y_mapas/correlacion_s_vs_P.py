@@ -7,7 +7,9 @@ orificio).
 
 Figura: un solo panel, color y marcador por sistema (estilo_figuras.py),
 puntos sin lineas. Se usa un solo orificio W (el _W_ de la carpeta, --W,
-default 2.0) para que <s> sea comparable. --logy: eje y logaritmico.
+default 2.0) para que <s> sea comparable. --logy / --logx / --loglog: eje
+y, eje x o los dos en escala logaritmica (el pdf lleva el sufijo -logy,
+-logx o -loglog, asi no pisa la version lineal).
 --paneles: un panel por sistema con el color segun chi.
 
 Entradas:
@@ -121,6 +123,26 @@ def agregar_puros(df):
     return pd.concat([mezclas] + extra, ignore_index=True) if len(mezclas) else df
 
 
+def ejes_log(ax, logx, logy):
+    """Escala log con numeros comunes en las marcas (4, 10, 100 en vez de
+    4x10^0). Las marcas se eligen segun el rango: si cubre menos de ~1.5
+    decadas, 1..9 por decada (ej. 50, 60, 70); si no, 1, 2, 5."""
+    from matplotlib.ticker import ScalarFormatter, NullFormatter, LogLocator
+    for usar, eje, set_scale, get_lim in ((logx, ax.xaxis, ax.set_xscale, ax.get_xlim),
+                                          (logy, ax.yaxis, ax.set_yscale, ax.get_ylim)):
+        if not usar:
+            continue
+        set_scale('log')
+        lo, hi = get_lim()
+        decadas = np.log10(hi / lo) if lo > 0 and hi > lo else 2.0
+        subs = np.arange(1, 10) if decadas < 1.5 else (1.0, 2.0, 5.0)
+        eje.set_major_locator(LogLocator(base=10, subs=subs))
+        fmt = ScalarFormatter()
+        fmt.set_scientific(False)
+        eje.set_major_formatter(fmt)
+        eje.set_minor_formatter(NullFormatter())
+
+
 def pearson(x, y, logy):
     x, y = np.asarray(x, float), np.asarray(y, float)
     if logy:
@@ -159,13 +181,7 @@ def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_m
             ax.scatter(g['P'], g['s'], c=g['chi'], cmap=cmap, norm=norm, marker=m, s=55,
                        edgecolors='black', linewidths=0.6, zorder=3, label=lbl)
         ax.set_title(f"{estilo_sistema(sis)[2]}  ($R_a = {area_ratio:g}$)", fontsize='medium')
-        if logx:
-            ax.set_xscale('log')
-        if logy:
-            from matplotlib.ticker import ScalarFormatter, NullFormatter
-            ax.set_yscale('log')
-            ax.yaxis.set_major_formatter(ScalarFormatter())
-            ax.yaxis.set_minor_formatter(NullFormatter())
+        ejes_log(ax, logx, logy)
     for ax in axes.flat[len(sistemas):]:
         ax.set_visible(False)
     for ax in axes[-1, :]:
@@ -195,13 +211,7 @@ def graficar(df, out, magnitud, region, tipo_s, logx, logy, error, area_ratio):
                     ms=7, label=lbl, **ERRORBAR_KW)
     ax.set_xlabel(f"{ETIQUETA_X[magnitud]} ({NOMBRE_REGION[region]})")
     ax.set_ylabel(ETIQUETA_Y[tipo_s])
-    if logx:
-        ax.set_xscale('log')
-    if logy:
-        from matplotlib.ticker import ScalarFormatter, NullFormatter
-        ax.set_yscale('log')
-        ax.yaxis.set_major_formatter(ScalarFormatter())
-        ax.yaxis.set_minor_formatter(NullFormatter())
+    ejes_log(ax, logx, logy)
     ax.legend(title=rf"$R_a = {area_ratio:g}$", frameon=False,
               loc='best', fontsize='small')
     return guardar_figura(out, fig)
@@ -227,8 +237,9 @@ def main():
                     help='solo avalanchas que terminaron en un atasco guardado (con arco)')
     ap.add_argument('--W', type=float, default=2.0,
                     help='orificio W de la carpeta (_W_2p0 -> 2.0, default); un solo orificio por figura')
-    ap.add_argument('--logx', action='store_true')
-    ap.add_argument('--logy', action='store_true', help='eje y logaritmico (r se calcula con log<s>)')
+    ap.add_argument('--logx', action='store_true', help='eje x (presion) logaritmico')
+    ap.add_argument('--logy', action='store_true', help='eje y (<s>) logaritmico (r se calcula con log<s>)')
+    ap.add_argument('--loglog', action='store_true', help='los dos ejes logaritmicos (= --logx --logy)')
     ap.add_argument('--paneles', action='store_true',
                     help='un panel por sistema con el color segun chi (por defecto: un solo panel, '
                          'color y marcador por sistema)')
@@ -236,6 +247,8 @@ def main():
     ap.add_argument('--out', default=None,
                     help='pdf de salida (default: 5_graficos_finales/16-s-vs-<P|tau>-<region>-ratio-<r>-W-<W>.pdf)')
     args = ap.parse_args()
+    if args.loglog:
+        args.logx = args.logy = True
 
     pres = presion_por_simulacion(args.presion, args.magnitud, args.region)
     aval = avalanchas_por_simulacion(args.av, args.idx, COLUMNA_S[args.s], args.solo_con_arco)
@@ -263,7 +276,8 @@ def main():
 
     out = args.out or os.path.join(
         rutas.GRAFICOS_FINALES_DIR,
-        f"16-s-vs-{args.magnitud}-{args.region}-ratio-{args.area_ratio:g}-W-{args.W:g}.pdf")
+        f"16-s-vs-{args.magnitud}-{args.region}-ratio-{args.area_ratio:g}-W-{args.W:g}"
+        f"{'-loglog' if args.logx and args.logy else '-logx' if args.logx else '-logy' if args.logy else ''}.pdf")
     datos = os.path.splitext(out)[0] + '_datos.csv'
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     cols = ['sistema', 'chi', 'area_ratio_nominal', 'Radio_salida', 'W', 'clave', 'P', 'P_sem', 'n_atascos',
