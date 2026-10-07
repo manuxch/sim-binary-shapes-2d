@@ -5,21 +5,10 @@ Correlacion entre el tamano medio de avalancha <s> y la presion media <P>
 de los atascos, un punto por simulacion (sistema, chi, razon de areas,
 orificio).
 
-Figura (por defecto): un panel por sistema; el color de cada punto es chi
-(barra de color). Se usa un solo orificio W (el _W_ de la carpeta, --W,
-default 2.0), para que <s> sea comparable; si aun quedan varias familias
-(distinto Radio_salida), cada una tiene su marcador. Solo se unen con una linea
-los puntos de una misma familia, en orden de chi. Eje y logaritmico (<s> va
-de ~1 a cientos); --liny para lineal. --un_panel: todos los sistemas en un
-mismo panel, color por sistema (la version anterior).
-
-  <s>  media de 'tamano_big' (granos grandes por avalancha, la misma <s> de
-       graficos_finales.py) o de 'total_mix' (--s total), sobre todas las
-       avalanchas de la simulacion. Error: SEM entre avalanchas.
-  <P>  presion reducida P/g de la region (--region arco|roi|bulk), media
-       pesada por area de grano sobre todos los atascos de la simulacion.
-       Error: SEM entre atascos (igual que comparar_presion_por_chi.py).
-       Con --magnitud tau se usa el deviador tau/g en vez de P.
+Figura: un solo panel, color y marcador por sistema (estilo_figuras.py),
+puntos sin lineas. Se usa un solo orificio W (el _W_ de la carpeta, --W,
+default 2.0) para que <s> sea comparable. --logy: eje y logaritmico.
+--paneles: un panel por sistema con el color segun chi.
 
 Entradas:
   resumen_presion_por_atasco.csv     (presion_tensor_arch.py)
@@ -31,8 +20,8 @@ calcularon con el disco montado en rutas distintas.
 
 Salida (en processed_data/5_graficos_finales/ por defecto):
   16-s-vs-P-<region>-ratio-<r>-W-<W>.pdf  y  ..._datos.csv con los valores graficados.
-Coeficiente de Pearson r de cada sistema en el titulo de su panel (con
-eje y log, r se calcula con log<s>).
+En la leyenda: coeficiente de Pearson r de cada sistema y, en el titulo de
+la leyenda, el de todos los puntos (con --logy, r se calcula con log<s>).
 
 Uso:
     python3 analysis/3_presion_y_mapas/correlacion_s_vs_P.py \\
@@ -160,7 +149,6 @@ def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_m
             fam = tuple(fam)
             g = g.sort_values('chi')
             m = marcador.get(fam, 'o')
-            ax.plot(g['P'], g['s'], color='0.65', lw=0.9, zorder=1)
             if error:
                 ax.errorbar(g['P'], g['s'], xerr=g['P_sem'], yerr=g['s_sem'], fmt='none', ecolor='0.55',
                             elinewidth=0.8, capsize=2, zorder=2)
@@ -202,19 +190,22 @@ def graficar(df, out, magnitud, region, tipo_s, logx, logy, error):
     for sis in sistemas:
         sub = df[df['sistema'] == sis].sort_values('chi')
         color, marker, etiqueta = estilo_sistema(sis)
-        r = sub[['P', 's']].corr().iloc[0, 1] if len(sub) > 2 else np.nan
+        r = pearson(sub['P'], sub['s'], logy)
         lbl = f"{etiqueta} ($r$ = {r:.2f})" if np.isfinite(r) else etiqueta
         xerr = sub['P_sem'] if error else None
         yerr = sub['s_sem'] if error else None
-        ax.errorbar(sub['P'], sub['s'], xerr=xerr, yerr=yerr, color=color, marker=marker, ls='-', lw=0.8,
+        ax.errorbar(sub['P'], sub['s'], xerr=xerr, yerr=yerr, color=color, marker=marker, ls='none',
                     ms=7, label=lbl, **ERRORBAR_KW)
-    r_tot = df[['P', 's']].corr().iloc[0, 1] if len(df) > 2 else np.nan
+    r_tot = pearson(df['P'], df['s'], logy)
     ax.set_xlabel(f"{ETIQUETA_X[magnitud]} ({NOMBRE_REGION[region]})")
     ax.set_ylabel(ETIQUETA_Y[tipo_s])
     if logx:
         ax.set_xscale('log')
     if logy:
+        from matplotlib.ticker import ScalarFormatter, NullFormatter
         ax.set_yscale('log')
+        ax.yaxis.set_major_formatter(ScalarFormatter())
+        ax.yaxis.set_minor_formatter(NullFormatter())
     ax.legend(title=f"all: $r$ = {r_tot:.2f}" if np.isfinite(r_tot) else None, frameon=False,
               loc='best', fontsize='small')
     return guardar_figura(out, fig)
@@ -241,9 +232,10 @@ def main():
     ap.add_argument('--W', type=float, default=2.0,
                     help='orificio W de la carpeta (_W_2p0 -> 2.0, default); un solo orificio por figura')
     ap.add_argument('--logx', action='store_true')
-    ap.add_argument('--liny', action='store_true', help='eje y lineal (por defecto logaritmico)')
-    ap.add_argument('--un_panel', action='store_true',
-                    help='todos los sistemas en un mismo panel, color por sistema')
+    ap.add_argument('--logy', action='store_true', help='eje y logaritmico (r se calcula con log<s>)')
+    ap.add_argument('--paneles', action='store_true',
+                    help='un panel por sistema con el color segun chi (por defecto: un solo panel, '
+                         'color y marcador por sistema)')
     ap.add_argument('--sin_error', action='store_true', help='sin barras de error')
     ap.add_argument('--out', default=None,
                     help='pdf de salida (default: 5_graficos_finales/16-s-vs-<P|tau>-<region>-ratio-<r>-W-<W>.pdf)')
@@ -284,12 +276,12 @@ def main():
     print("Puntos por sistema y familia (Radio_salida, W): valores de chi")
     for (sis, rs, w), g in df.groupby(['sistema', 'Radio_salida', 'W'], dropna=False):
         print(f"  {sis:20s} R_out={rs:<5g} W={w:<5g} chi={sorted(g['chi'].round(3).tolist())}")
-    if args.un_panel:
-        path = graficar(df, out, args.magnitud, args.region, args.s, args.logx, not args.liny,
-                        not args.sin_error)
-    else:
-        path = graficar_paneles(df, out, args.magnitud, args.region, args.s, args.logx, not args.liny,
+    if args.paneles:
+        path = graficar_paneles(df, out, args.magnitud, args.region, args.s, args.logx, args.logy,
                                 not args.sin_error, args.chi_max)
+    else:
+        path = graficar(df, out, args.magnitud, args.region, args.s, args.logx, args.logy,
+                        not args.sin_error)
     print(f"Figura: {path}\nDatos:  {datos}")
 
 
