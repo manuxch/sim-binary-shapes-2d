@@ -20,8 +20,8 @@ calcularon con el disco montado en rutas distintas.
 
 Salida (en processed_data/5_graficos_finales/ por defecto):
   16-s-vs-P-<region>-ratio-<r>-W-<W>.pdf  y  ..._datos.csv con los valores graficados.
-En la leyenda: coeficiente de Pearson r de cada sistema y, en el titulo de
-la leyenda, el de todos los puntos (con --logy, r se calcula con log<s>).
+En la leyenda va la razon de areas R_a; el coeficiente de Pearson r de cada
+sistema solo se imprime por pantalla (con --logy, se calcula con log<s>).
 
 Uso:
     python3 analysis/3_presion_y_mapas/correlacion_s_vs_P.py \\
@@ -129,7 +129,7 @@ def pearson(x, y, logy):
     return np.corrcoef(x, y)[0, 1] if len(x) > 2 else np.nan
 
 
-def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_max):
+def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_max, area_ratio):
     from matplotlib.colors import Normalize
     from matplotlib.cm import ScalarMappable
     aplicar_estilo()
@@ -158,9 +158,7 @@ def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_m
                 vistos.add(fam)
             ax.scatter(g['P'], g['s'], c=g['chi'], cmap=cmap, norm=norm, marker=m, s=55,
                        edgecolors='black', linewidths=0.6, zorder=3, label=lbl)
-        r = pearson(sub['P'], sub['s'], logy)
-        etiqueta = estilo_sistema(sis)[2]
-        ax.set_title(f"{etiqueta}  ($r$ = {r:.2f})" if np.isfinite(r) else etiqueta, fontsize='medium')
+        ax.set_title(f"{estilo_sistema(sis)[2]}  ($R_a = {area_ratio:g}$)", fontsize='medium')
         if logx:
             ax.set_xscale('log')
         if logy:
@@ -183,20 +181,18 @@ def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_m
     return guardar_figura(out, fig)
 
 
-def graficar(df, out, magnitud, region, tipo_s, logx, logy, error):
+def graficar(df, out, magnitud, region, tipo_s, logx, logy, error, area_ratio):
     aplicar_estilo()
     fig, ax = plt.subplots(figsize=(7.5, 5.5))
     sistemas = sorted(df['sistema'].unique(), key=lambda s: (s != 'Disco(G)-Disco(C)', s))
     for sis in sistemas:
         sub = df[df['sistema'] == sis].sort_values('chi')
         color, marker, etiqueta = estilo_sistema(sis)
-        r = pearson(sub['P'], sub['s'], logy)
-        lbl = f"{etiqueta} ($r$ = {r:.2f})" if np.isfinite(r) else etiqueta
+        lbl = etiqueta
         xerr = sub['P_sem'] if error else None
         yerr = sub['s_sem'] if error else None
         ax.errorbar(sub['P'], sub['s'], xerr=xerr, yerr=yerr, color=color, marker=marker, ls='none',
                     ms=7, label=lbl, **ERRORBAR_KW)
-    r_tot = pearson(df['P'], df['s'], logy)
     ax.set_xlabel(f"{ETIQUETA_X[magnitud]} ({NOMBRE_REGION[region]})")
     ax.set_ylabel(ETIQUETA_Y[tipo_s])
     if logx:
@@ -206,7 +202,7 @@ def graficar(df, out, magnitud, region, tipo_s, logx, logy, error):
         ax.set_yscale('log')
         ax.yaxis.set_major_formatter(ScalarFormatter())
         ax.yaxis.set_minor_formatter(NullFormatter())
-    ax.legend(title=f"all: $r$ = {r_tot:.2f}" if np.isfinite(r_tot) else None, frameon=False,
+    ax.legend(title=rf"$R_a = {area_ratio:g}$", frameon=False,
               loc='best', fontsize='small')
     return guardar_figura(out, fig)
 
@@ -276,12 +272,15 @@ def main():
     print("Puntos por sistema y familia (Radio_salida, W): valores de chi")
     for (sis, rs, w), g in df.groupby(['sistema', 'Radio_salida', 'W'], dropna=False):
         print(f"  {sis:20s} R_out={rs:<5g} W={w:<5g} chi={sorted(g['chi'].round(3).tolist())}")
+    print("Pearson r (solo informativo, no va en la figura):")
+    for sis, g in df.groupby('sistema'):
+        print(f"  {sis:20s} r = {pearson(g['P'], g['s'], args.logy):+.2f}")
     if args.paneles:
         path = graficar_paneles(df, out, args.magnitud, args.region, args.s, args.logx, args.logy,
-                                not args.sin_error, args.chi_max)
+                                not args.sin_error, args.chi_max, args.area_ratio)
     else:
         path = graficar(df, out, args.magnitud, args.region, args.s, args.logx, args.logy,
-                        not args.sin_error)
+                        not args.sin_error, args.area_ratio)
     print(f"Figura: {path}\nDatos:  {datos}")
 
 
