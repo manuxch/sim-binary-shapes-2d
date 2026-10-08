@@ -259,7 +259,9 @@ def plot_sweeps_by_system(
         if p0 is None:
             continue
 
-        targets = [0.1, 0.2, 0.4, 0.5]
+        # R_a = 0.5 no se incluye: solo existe para Disco-Disco y no se puede
+        # comparar entre sistemas.
+        targets = [0.1, 0.2, 0.4]
         curvas = []
 
         for target in targets:
@@ -287,7 +289,7 @@ def plot_sweeps_by_system(
             err = [e0] + grp['log_S_err'].tolist()
             curvas.append((chosen, x, y, err))
 
-            print(f"\nSistema: {system_name}\n  label AR {target} -> {AR_COL} real {chosen:.4f}")
+            print(f"\nSistema: {system_name}\n  R_a {target} -> {AR_COL} real {chosen:.4f}")
 
             x_all.extend(x)
             y_arr = np.asarray(y, dtype=float)
@@ -333,7 +335,8 @@ def plot_sweeps_by_system(
 
         plt.xlabel(r"Concentration $\chi$")
         plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
-        plt.legend(loc='upper left')
+        # Cartel con el sistema (ej. "Triangle-Disk") como titulo de la leyenda
+        plt.legend(loc='upper left', title=CFG.english_labels.get(system_name, system_name))
         plt.xlim(*x_range)
         plt.ylim(*y_range)
 
@@ -344,7 +347,7 @@ def plot_sweeps_by_system(
 
 
 def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15):
-    print(f"  -> Plotting 5a/b: Normalized Effects (AR ~ {target_ar})...")
+    print(f"  -> Plotting 5a/b: Normalized Effects (R_a ~ {target_ar})...")
 
     df_mix = df[df['chi'] > 0].copy()
     if df_mix.empty:
@@ -398,7 +401,7 @@ def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15):
 
 
 def plot_geometric_effects_raw(df: pd.DataFrame, target_ar: float = 0.15):
-    print(f"  -> Plotting 5c: Raw Log-Size Matrix Effect (AR ~ {target_ar})...")
+    print(f"  -> Plotting 5c: Raw Log-Size Matrix Effect (R_a ~ {target_ar})...")
     main_dd = df['D_d_sq'].value_counts().idxmax()
 
     plt.figure()
@@ -435,7 +438,7 @@ def plot_geometric_effects_raw(df: pd.DataFrame, target_ar: float = 0.15):
 
 
 def plot_geometric_effects_linear(df: pd.DataFrame, target_ar: float = 0.15):
-    print(f"  -> Plotting 11: Linear Scale (AR ~ {target_ar})...")
+    print(f"  -> Plotting 11: Linear Scale (R_a ~ {target_ar})...")
     main_dd = df['D_d_sq'].value_counts().idxmax()
 
     def draw_lin(sistemas: List[str], filename: str):
@@ -488,7 +491,7 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
     matrix_systems = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)']
     df_filtered = df_arcos[df_arcos['sistema'].isin(matrix_systems)].copy()
 
-    # Filtro general: disco-disco usa AR nominal ~0.1; el resto target_ar ~0.15.
+    # Filtro general: disco-disco usa R_a nominal ~0.1; el resto target_ar ~0.15.
     df_mix = filter_standard_size(df_filtered[df_filtered['chi'] > 0], 0.15, 0.1, system_col='sistema')
     if df_mix.empty:
         print("  [!] No hay datos de arcos para el filtro estándar de tamaño.")
@@ -704,11 +707,12 @@ def main():
     # Limpieza: sistema fuera del estudio actual.
     df = df[df['sistema'] != 'Cuad(G)-Cuad(C)']
 
+    # Orden de los sistemas: Triangle, Square, Pentagon y Disk-Disk al final.
     sistemas_meta = [
-        ('Disco(G)-Disco(C)', 'Disk'),
+        ('Tri(G)-Disco(C)', 'Triangle'),
         ('Cuad(G)-Disco(C)', 'Square'),
         ('Pent(G)-Disco(C)', 'Pentagon'),
-        ('Tri(G)-Disco(C)', 'Triangle')
+        ('Disco(G)-Disco(C)', 'Disk'),
     ]
 
     # Flujo / avalanchas
