@@ -308,9 +308,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Grafica chi de salida en funcion del tiempo para cada simulacion del index.")
     parser.add_argument('--index', default=INDEX_FILE, help='master_sim_index.csv')
-    parser.add_argument('--dir', default=None,
-                        help="carpeta de simulaciones a recorrer (ej. .../R_2.0/CUADRADOS); arma el indice "
-                             "en el momento con indexer.py y no usa --index")
+    parser.add_argument('--dir', nargs='+', default=None,
+                        help="carpeta(s) de simulaciones a recorrer (ej. .../R_2.0/CUADRADOS .../TRIANGULOS); "
+                             "arma el indice en el momento con indexer.py y no usa --index")
     parser.add_argument('--incluir', default=None,
                         help="regex sobre la ruta de la simulacion: solo las que coinciden")
     parser.add_argument('--out_csv', default=None,
@@ -349,11 +349,17 @@ def main():
 
     if args.dir:
         from indexer import indexar
-        print(f"Indexando {args.dir} ...")
-        df_idx = indexar(args.dir)
-        if df_idx is None:
+        partes = []
+        for d in args.dir:
+            print(f"Indexando {d} ...")
+            parte = indexar(d)
+            n = 0 if parte is None else len(parte)
+            print(f"  {n} simulaciones encontradas.")
+            if parte is not None:
+                partes.append(parte)
+        if not partes:
             raise SystemExit(f"No encontre simulaciones (carpetas con params.in) en {args.dir}")
-        print(f"  {len(df_idx)} simulaciones encontradas.")
+        df_idx = pd.concat(partes, ignore_index=True).drop_duplicates(subset=['path'])
     else:
         if not os.path.exists(args.index):
             print(f"Error: No se encontró {args.index} para chi_temporal.")
