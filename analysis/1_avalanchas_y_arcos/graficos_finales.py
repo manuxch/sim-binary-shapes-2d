@@ -198,7 +198,7 @@ def plot_disco_vs_area_ratio(df: pd.DataFrame):
             **ERRORBAR_KW,
         )
 
-    plt.xlabel(r"Nominal Area Ratio $R_a$")
+    plt.xlabel(r"Nominal Area Ratio $R_{\rm a}$")
     plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
 
     plt.legend(loc='best')
@@ -331,7 +331,7 @@ def plot_sweeps_by_system(
         colors, markers = SEQ_STYLE(len(curvas))
         for (chosen, x, y, err), color, marker in zip(curvas, colors, markers):
             plt.errorbar(x, y, yerr=err, fmt=f'{marker}-', color=color,
-                         label=rf"$R_a = {chosen:.3g}$", **ERRORBAR_KW)
+                         label=rf"$R_{{\rm a}} = {chosen:.3g}$", **ERRORBAR_KW)
 
         plt.xlabel(r"Concentration $\chi$")
         plt.ylabel(r"$\ln(\langle s \rangle + 1)$")

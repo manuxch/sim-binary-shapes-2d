@@ -180,7 +180,7 @@ def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_m
                 vistos.add(fam)
             ax.scatter(g['P'], g['s'], c=g['chi'], cmap=cmap, norm=norm, marker=m, s=55,
                        edgecolors='black', linewidths=0.6, zorder=3, label=lbl)
-        ax.set_title(f"{estilo_sistema(sis)[2]}  ($R_a = {area_ratio:g}$)", fontsize='medium')
+        ax.set_title(rf"{estilo_sistema(sis)[2]}  ($R_{{\rm a}} = {area_ratio:g}$)", fontsize='medium')
         ejes_log(ax, logx, logy)
     for ax in axes.flat[len(sistemas):]:
         ax.set_visible(False)
@@ -212,7 +212,7 @@ def graficar(df, out, magnitud, region, tipo_s, logx, logy, error, area_ratio):
     ax.set_xlabel(f"{ETIQUETA_X[magnitud]} ({NOMBRE_REGION[region]})")
     ax.set_ylabel(ETIQUETA_Y[tipo_s])
     ejes_log(ax, logx, logy)
-    ax.legend(title=rf"$R_a = {area_ratio:g}$", frameon=False,
+    ax.legend(title=rf"$R_{{\rm a}} = {area_ratio:g}$", frameon=False,
               loc='best', fontsize='small')
     return guardar_figura(out, fig)
 
