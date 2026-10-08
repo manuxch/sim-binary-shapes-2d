@@ -206,20 +206,6 @@ def plot_disco_vs_area_ratio(df: pd.DataFrame):
     save_plot("2-discog-discoc-vs-area-ratio")
 
 
-LOCS_DERECHA = ('lower right', 'center right', 'upper right')
-
-
-def _puntos_tapados(ax, puntos, loc, titulo, margen_px=10.0):
-    """Cuantos puntos (en coordenadas de datos) quedan debajo de la leyenda,
-    con un margen en pixeles por el tamano de marcadores y barras de error."""
-    leg = ax.legend(loc=loc, title=titulo)
-    ax.figure.canvas.draw()
-    caja = leg.get_window_extent()
-    disp = ax.transData.transform(puntos)
-    return int(np.sum((disp[:, 0] >= caja.x0 - margen_px) & (disp[:, 0] <= caja.x1 + margen_px) &
-                      (disp[:, 1] >= caja.y0 - margen_px) & (disp[:, 1] <= caja.y1 + margen_px)))
-
-
 def _puntos_de(curvas, n_seg=30):
     """Puntos de las curvas (R_a, x, y, err): los datos, los extremos de las
     barras de error y puntos intermedios sobre las lineas que los unen."""
@@ -235,29 +221,30 @@ def _puntos_de(curvas, n_seg=30):
     return np.asarray(puntos, dtype=float)
 
 
-def margen_para_leyenda(ax, curvas, titulo, paso=0.1, max_extra=1.0):
+def _puntos_tapados(ax, puntos, titulo, margen_px=10.0):
+    """Cuantos puntos (en coordenadas de datos) quedan debajo de la leyenda
+    arriba a la derecha, con un margen en pixeles por marcadores y barras."""
+    leg = ax.legend(loc='upper right', title=titulo)
+    ax.figure.canvas.draw()
+    caja = leg.get_window_extent()
+    disp = ax.transData.transform(puntos)
+    return int(np.sum((disp[:, 0] >= caja.x0 - margen_px) & (disp[:, 0] <= caja.x1 + margen_px) &
+                      (disp[:, 1] >= caja.y0 - margen_px) & (disp[:, 1] <= caja.y1 + margen_px)))
+
+
+def margen_para_leyenda(ax, curvas, titulo, paso=0.05, max_extra=1.5):
     """Fraccion del rango de y que hay que agregar arriba para que la leyenda
-    entre a la derecha sin tapar curvas (0 si ya entra). No cambia los ejes."""
+    entre arriba a la derecha sin tapar curvas (0 si ya entra). No cambia los ejes."""
     puntos = _puntos_de(curvas)
-    if any(_puntos_tapados(ax, puntos, loc, titulo) == 0 for loc in LOCS_DERECHA):
-        return 0.0
     y0, y1 = ax.get_ylim()
-    extra = paso
+    extra = 0.0
     while extra <= max_extra:
         ax.set_ylim(y0, y1 + extra * (y1 - y0))
-        if _puntos_tapados(ax, puntos, 'upper right', titulo) == 0:
+        if _puntos_tapados(ax, puntos, titulo) == 0:
             break
         extra += paso
     ax.set_ylim(y0, y1)
     return min(extra, max_extra)
-
-
-def leyenda_a_la_derecha(ax, curvas, titulo):
-    """Leyenda adentro de los ejes, del lado derecho, en la posicion (abajo,
-    centro o arriba) que tapa menos puntos con sus barras de error."""
-    puntos = _puntos_de(curvas)
-    tapados = {loc: _puntos_tapados(ax, puntos, loc, titulo) for loc in LOCS_DERECHA}
-    ax.legend(loc=min(LOCS_DERECHA, key=lambda l: tapados[l]), title=titulo)
 
 
 def plot_sweeps_by_system(
@@ -399,16 +386,363 @@ def plot_sweeps_by_system(
         figuras.append((fig, ax, curvas, titulo, nombre))
 
     # Cartel con el sistema (ej. "Triangle-Disk") como titulo de la leyenda,
-    # adentro y a la derecha sin tapar curvas. Si en alguna figura no entra,
-    # se agrega el mismo margen arriba en TODAS (siguen con el mismo eje y).
+    # adentro, arriba a la derecha. Si en alguna figura tapa curvas, se agrega
+    # el mismo margen arriba en TODAS (siguen con el mismo eje y).
     extra = max(margen_para_leyenda(ax, curvas, titulo) for _, ax, curvas, titulo, _ in figuras)
     for fig, ax, curvas, titulo, nombre in figuras:
-        if extra > 0:
-            ax.set_ylim(y_range[0], y_range[1] + extra * (y_range[1] - y_range[0]))
-        leyenda_a_la_derecha(ax, curvas, titulo)
+        ax.set_ylim(y_range[0], y_range[1] + extra * (y_range[1] - y_range[0]))
+        ax.legend(loc='upper right', title=titulo)
         plt.figure(fig.number)
         save_plot(nombre)
 
+
+def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15):
+    print(f"  -> Plotting 5a/b: Normalized Effects (R_a ~ {target_ar})...")
+
+    df_mix = df[df['chi'] > 0].copy()
+    if df_mix.empty:
+        return
+
+    main_dd = df_mix['D_d_sq'].value_counts().idxmax()
+    df_puros = (
+        df[df['chi'] == 0][['grano_base', 'D_d_sq', 'S_mean', 'S_sem']]
+        .rename(columns={'S_mean': 'S0', 'S_sem': 'S0_err'})
+    )
+
+    df_norm = pd.merge(df_mix[df_mix['D_d_sq'] == main_dd], df_puros, on=['grano_base', 'D_d_sq'])
+    if df_norm.empty:
+        return
+
+    df_norm['log_S_norm'] = np.log((df_norm['S_mean'] / df_norm['S0']) + 1)
+    df_norm['log_S_norm_err'] = df_norm['S_sem'] / (df_norm['S_mean'] + df_norm['S0'])
+
+    def draw(sistemas: List[str], filename: str):
+        plt.figure()
+        for sis in sistemas:
+            grp = filter_standard_size(df_norm[df_norm['sistema'] == sis], target_ar, 0.07)
+            if grp.empty:
+                continue
+            grp_sis = (
+                grp.groupby('chi')
+                   .agg(log_S_norm=('log_S_norm', 'mean'), log_S_norm_err=('log_S_norm_err', 'mean'))
+                   .reset_index()
+                   .sort_values('chi')
+            )
+            if grp_sis.empty:
+                continue
+
+            color, marker = CFG.system_style.get(sis, ('black', 'o'))
+            label_en = CFG.english_labels.get(sis, sis)
+            plt.errorbar(
+                [0.0] + grp_sis['chi'].tolist(),
+                [np.log(2.0)] + grp_sis['log_S_norm'].tolist(),
+                yerr=[0.0] + grp_sis['log_S_norm_err'].tolist(),
+                fmt=f'{marker}-', color=color, label=label_en, **ERRORBAR_KW,
+            )
+
+        plt.xlabel(r"Concentration $\chi$")
+        plt.ylabel(r"$\ln(\langle s \rangle / \langle s_0 \rangle + 1)$")
+        plt.ylim(0.4, 2.5)
+        plt.legend(loc='upper left')
+        save_plot(filename)
+
+    draw(['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)', 'Disco(G)-Tri(C)'], "5a-additive-normalized")
+    draw(['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)'], "5b-matrix-normalized")
+
+
+def plot_geometric_effects_raw(df: pd.DataFrame, target_ar: float = 0.15):
+    print(f"  -> Plotting 5c: Raw Log-Size Matrix Effect (R_a ~ {target_ar})...")
+    main_dd = df['D_d_sq'].value_counts().idxmax()
+
+    plt.figure()
+    for sis in ['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)']:
+        grp = filter_standard_size(df[df['D_d_sq'] == main_dd], target_ar, 0.07)
+        grp_sis = (
+            grp[grp['sistema'] == sis]
+            .groupby('chi')
+            .agg(log_S=('log_S', 'mean'), log_S_err=('log_S_err', 'mean'))
+            .reset_index()
+            .sort_values('chi')
+        )
+        if grp_sis.empty:
+            continue
+
+        p0, e0 = get_pure_ref(df, sis, main_dd, 'log_S')
+        if p0 is None:
+            continue
+
+        color, marker = CFG.system_style.get(sis, ('black', 'o'))
+        label_en = CFG.english_labels.get(sis, sis)
+        plt.errorbar(
+            [0.0] + grp_sis['chi'].tolist(),
+            [p0] + grp_sis['log_S'].tolist(),
+            yerr=[e0] + grp_sis['log_S_err'].tolist(),
+            fmt=f'{marker}-', color=color, label=label_en, **ERRORBAR_KW,
+        )
+
+    plt.xlabel(r"Concentration $\chi$")
+    plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
+    plt.ylim(2.2, 6.5)
+    plt.legend()
+    save_plot("5c-matrix-raw-log")
+
+
+def plot_geometric_effects_linear(df: pd.DataFrame, target_ar: float = 0.15):
+    print(f"  -> Plotting 11: Linear Scale (R_a ~ {target_ar})...")
+    main_dd = df['D_d_sq'].value_counts().idxmax()
+
+    def draw_lin(sistemas: List[str], filename: str):
+        plt.figure()
+        for sis in sistemas:
+            grp = filter_standard_size(df[df['D_d_sq'] == main_dd], target_ar, 0.07)
+            grp_sis = (
+                grp[grp['sistema'] == sis]
+                .groupby('chi')
+                .agg(S_mean=('S_mean', 'mean'), S_sem=('S_sem', 'mean'))
+                .reset_index()
+                .sort_values('chi')
+            )
+            if grp_sis.empty:
+                continue
+
+            p0, e0 = get_pure_ref(df, sis, main_dd, 'S_mean')
+            if p0 is None:
+                continue
+
+            color, marker = CFG.system_style.get(sis, ('black', 'o'))
+            label_en = CFG.english_labels.get(sis, sis)
+            plt.errorbar(
+                [0.0] + grp_sis['chi'].tolist(),
+                [p0] + grp_sis['S_mean'].tolist(),
+                yerr=[e0] + grp_sis['S_sem'].tolist(),
+                fmt=f'{marker}-', color=color, label=label_en, **ERRORBAR_KW,
+            )
+
+        plt.xlabel(r"Concentration $\chi$")
+        plt.ylabel(r"Mean Size $\langle s \rangle$")
+        plt.legend(loc='upper left')
+        save_plot(filename)
+
+    draw_lin(['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)', 'Disco(G)-Tri(C)'], "11a-additive-linear")
+    draw_lin(['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)'], "11b-matrix-linear")
+
+# =============================================================================
+# GRÁFICOS DE ARCOS
+# =============================================================================
+
+def plot_arch_analysis(df_stats: pd.DataFrame):
+    """Plot 6, 9 y 10: composición, tortuosidad y tamaños de avalancha."""
+    if not os.path.exists(CFG.arcos_path):
+        return
+
+    print("\n[+] Starting Arch Analysis (Target chi = 0.2)...")
+    df_arcos = prepare_arcos(pd.read_csv(CFG.arcos_path))
+
+    matrix_systems = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)']
+    df_filtered = df_arcos[df_arcos['sistema'].isin(matrix_systems)].copy()
+
+    # Filtro general: disco-disco usa R_a nominal ~0.1; el resto target_ar ~0.15.
+    df_mix = filter_standard_size(df_filtered[df_filtered['chi'] > 0], 0.15, 0.1, system_col='sistema')
+    if df_mix.empty:
+        print("  [!] No hay datos de arcos para el filtro estándar de tamaño.")
+        return
+
+    # --- Plot 6: Composición ---
+    # Filtrar el DataFrame para conservar solo los valores de chi entre 0 y 0.4
+    df_filtered = df_mix[(df_mix['chi'] >= 0) & (df_mix['chi'] <= 0.4)].copy()
+    
+    df_filtered['frac_arco'] = df_filtered['Particulas_Tipo_1'] / df_filtered['Total_Particulas_Arco']
+    plt.figure()
+    for sys_name in matrix_systems:
+        group = df_filtered[df_filtered['sistema'] == sys_name]
+        if group.empty:
+            continue
+        grp = group.groupby('chi')['frac_arco'].agg(['mean', 'std', 'count']).reset_index()
+        grp['sem'] = grp['std'] / np.sqrt(grp['count'])
+        color, marker = CFG.system_style.get(sys_name, ('black', 'o'))
+        plt.errorbar(
+            grp['chi'], grp['mean'], yerr=grp['sem'],
+            fmt=f'{marker}-', color=color,
+            label=CFG.english_labels.get(sys_name, sys_name), **ERRORBAR_KW,
+        )
+
+    # Ajustar la línea de referencia homogénea para que vaya de 0 a 0.4
+    plt.plot([0, 0.5], [0, 0.5], **REF_LINE_KW, label='Homogeneous')
+    
+    # Opcional: fijar explícitamente los límites del eje x
+    plt.xlim(0, 0.45)
+    
+    plt.xlabel(r"Global Concentration $\chi$")
+    plt.ylabel(r"Arch Additive Fraction $\chi_{arch}$")
+    plt.legend(loc='upper left')
+    save_plot("6-arch-composition")
+
+    # --- Filtro chi = 0.2 ---
+    target_chi = 0.2
+    df_target = df_mix[np.isclose(df_mix['chi'], target_chi, atol=0.05)].copy()
+    if df_target.empty:
+        print(f"  [!] Advertencia: No hay datos de arcos para chi ~ {target_chi}")
+        return
+
+    color_map = {sys: CFG.system_style[sys][0] for sys in matrix_systems}
+    present = [s for s in matrix_systems if s in df_target['sistema'].unique()]
+    new_ticks = [CFG.english_labels.get(s, s) for s in present]
+
+    # --- Plot 9: Tortuosidad ---
+    plt.figure()
+    ax = sns.violinplot(
+        data=df_target, x='sistema', y='Tortuosidad', hue='sistema',
+        palette=color_map, inner='quartile', order=present, legend=False,
+    )
+    ax.set_xticks(range(len(present)))
+    ax.set_xticklabels(new_ticks, rotation=15)
+    anotar_chi(ax, target_chi)
+    plt.xlabel(None)
+    plt.ylabel("Tortuosity")
+    save_plot(f"9-arch-tortuosity-chi-{target_chi}")
+
+    # --- Plot 10: Avalanche Boxplot ---
+    if os.path.exists(CFG.raw_flow_path):
+        df_raw = pd.read_csv(CFG.raw_flow_path)
+        require_columns(df_raw, ['sim_hash', 'tamano_big'], 'resultados_completos_esqueleto.csv')
+        df_plot = pd.merge(
+            df_raw,
+            df_target[['sim_hash', 'sistema', 'chi']].drop_duplicates(),
+            on='sim_hash',
+            how='inner',
+        )
+        if not df_plot.empty:
+            plt.figure()
+            ax_box = sns.boxplot(
+                data=df_plot, x='sistema', y='tamano_big', hue='sistema',
+                palette=color_map, order=present, legend=False,
+            )
+            ax_box.set_xticks(range(len(present)))
+            ax_box.set_xticklabels(new_ticks, rotation=15)
+            anotar_chi(ax_box, target_chi)
+            plt.xlabel(None)
+            plt.yscale('log')
+            plt.ylabel(r"Avalanche Size $s$")
+            save_plot(f"10-avalanche-boxplot-chi-{target_chi}")
+
+
+def plot_arch_geometry_deep_dive(df_stats: pd.DataFrame):
+    """Gráficos 12, 13 y 14 de geometría de arcos para chi = 0.2."""
+    if not os.path.exists(CFG.arcos_path):
+        return
+
+    print("[+] Generando Geometría de Arcos (chi = 0.2)...")
+    df_arcos = prepare_arcos(pd.read_csv(CFG.arcos_path))
+
+    matrix_systems = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)']
+    target_chi = 0.2
+    df_plot = df_arcos[
+        (df_arcos['sistema'].isin(matrix_systems)) &
+        (np.isclose(df_arcos['chi'], target_chi, atol=0.05))
+    ].copy()
+    if df_plot.empty:
+        return
+
+    color_map = {sys: CFG.system_style[sys][0] for sys in matrix_systems}
+    present = [s for s in matrix_systems if s in df_plot['sistema'].unique()]
+    new_ticks = [CFG.english_labels.get(s, s) for s in present]
+
+    # --- Plot 12: Longitud vs Span ---
+    plt.figure()
+    for sys_name in present:
+        data = df_plot[df_plot['sistema'] == sys_name]
+        sns.regplot(
+            data=data, x='Span', y='Longitud', label=CFG.english_labels[sys_name],
+            color=color_map[sys_name], scatter_kws={'alpha': 0.05, 's': 2},
+            line_kws={'lw': 2.5},
+        )
+    plt.xlabel("Orifice Span ($L$)")
+    plt.ylabel("Arch Length ($s$)")
+    plt.legend(loc='upper left')
+    save_plot(f"12-arch-length-vs-span-chi-{target_chi}")
+
+    # --- Plot 13: Relación de aspecto ---
+    plt.figure()
+    ax = sns.violinplot(
+        data=df_plot, x='sistema', y='Relacion_Aspecto', hue='sistema',
+        palette=color_map, inner='quartile', order=present, legend=False,
+    )
+    ax.set_xticks(range(len(present)))
+    ax.set_xticklabels(new_ticks, rotation=15)
+    plt.xlabel(None)
+    plt.ylabel("Arch Aspect Ratio ($H/L$)")
+    anotar_chi(ax, target_chi)
+    save_plot(f"13-arch-aspect-ratio-chi-{target_chi}")
+
+    # --- Plot 14: Altura ---
+    plt.figure()
+    ax = sns.boxplot(
+        data=df_plot, x='sistema', y='Altura', hue='sistema',
+        palette=color_map, order=present, legend=False,
+    )
+    ax.set_xticks(range(len(present)))
+    ax.set_xticklabels(new_ticks, rotation=15)
+    plt.xlabel(None)
+    plt.ylabel("Arch Height ($H$)")
+    anotar_chi(ax, target_chi)
+    save_plot(f"14-arch-height-boxplot-chi-{target_chi}")
+
+
+def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
+    """Gráfico 15: evolución de relación de aspecto y tortuosidad vs chi."""
+    if not os.path.exists(CFG.arcos_path):
+        return
+
+    print("[+] Generando Evolución (vs Chi) - Solo métricas clave...")
+    df_arcos = prepare_arcos(pd.read_csv(CFG.arcos_path))
+
+    matrix_systems = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)']
+    df_filtered = filter_standard_size(
+        df_arcos[df_arcos['sistema'].isin(matrix_systems)],
+        0.15,
+        0.1,
+        system_col='sistema',
+    )
+    
+    # Filtrar para conservar solo los valores de chi de 0 a 0.4
+    df_filtered = df_filtered[(df_filtered['chi'] >= 0) & (df_filtered['chi'] <= 0.4)]
+
+    metrics = {
+        'Relacion_Aspecto': 'Arch Aspect Ratio ($H/L$)',
+        'Tortuosidad': 'Arch Tortuosity',
+    }
+
+    for metric, ylabel in metrics.items():
+        plt.figure()
+        for sys_name in matrix_systems:
+            group = df_filtered[df_filtered['sistema'] == sys_name]
+            if group.empty:
+                continue
+
+            summary = group.groupby('chi')[metric].agg(['mean', 'std', 'count']).reset_index()
+            summary = summary[summary['count'] >= 20]
+            if summary.empty:
+                continue
+
+            summary['sem'] = summary['std'] / np.sqrt(summary['count'])
+            color, marker = CFG.system_style.get(sys_name, ('black', 'o'))
+            plt.errorbar(
+                summary['chi'], summary['mean'], yerr=summary['sem'],
+                fmt=f'{marker}-', color=color,
+                label=CFG.english_labels.get(sys_name, sys_name), **ERRORBAR_KW,
+            )
+
+        # Fijar explícitamente los límites del eje x de 0 a 0.4
+        plt.xlim(0, 0.45)
+        
+        plt.xlabel(r"Concentration $\chi$")
+        plt.ylabel(ylabel)
+        plt.legend(loc='best')
+        save_plot(f"15-evolution-{metric.lower()}")
+
+# =============================================================================
+# MAIN
+# =============================================================================
 
 def main():
     print("[+] Starting integrated PDF pipeline...")
