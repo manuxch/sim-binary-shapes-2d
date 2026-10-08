@@ -53,10 +53,13 @@ if [ "$N" -eq 0 ]; then
     echo "No hay residuos para borrar."
     exit 0
 fi
-TOTAL=$(xargs -0 du -sch < "$LISTA" | tail -1 | cut -f1)
+# tamano total (xargs puede partir la lista en varios du: se suma todo)
+TOTAL_KB=$(xargs -0 du -sk < "$LISTA" | awk '{s += $1} END {print s + 0}')
+TOTAL=$(awk -v k="$TOTAL_KB" 'BEGIN { split("K M G T", u); i = 1; while (k >= 1024 && i < 4) { k /= 1024; i++ }; printf "%.1f%s", k, u[i] }')
 echo "Residuos encontrados: $N  (ocupan $TOTAL)"
-xargs -0 -n1 echo < "$LISTA" | sed 's/^/  /' | head -20
-[ "$N" -gt 20 ] && echo "  ... y $((N - 20)) mas"
+# solo las primeras 20 (head corta la tuberia: "|| true" para que no corte el script)
+{ tr '\0' '\n' < "$LISTA" | head -20 | sed 's/^/  /'; } || true
+if [ "$N" -gt 20 ]; then echo "  ... y $((N - 20)) mas"; fi
 
 if [ "$BORRAR" -eq 1 ]; then
     xargs -0 rm -rf < "$LISTA"
