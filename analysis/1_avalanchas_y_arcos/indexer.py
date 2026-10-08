@@ -215,8 +215,10 @@ def parse_params(filepath, folder_path):
         return None
 
 
-def main(base_dir=ROOT_DIR):
-    print(f"--- Indexando en: {base_dir} ---")
+def indexar(base_dir):
+    """Recorre base_dir y devuelve un DataFrame con una fila por simulacion
+    (carpeta con params.in), las mismas columnas que master_sim_index.csv.
+    None si no encuentra ninguna."""
     data = []
 
     for root, dirs, files in os.walk(base_dir):
@@ -239,8 +241,7 @@ def main(base_dir=ROOT_DIR):
         data.append(p)
 
     if not data:
-        print("No hay datos.")
-        return
+        return None
 
     df = pd.DataFrame(data)
 
@@ -261,7 +262,15 @@ def main(base_dir=ROOT_DIR):
     ]
 
     existentes = [c for c in cols_prioritarias if c in df.columns]
-    df = df[existentes + [c for c in df.columns if c not in existentes]]
+    return df[existentes + [c for c in df.columns if c not in existentes]]
+
+
+def main(base_dir=ROOT_DIR):
+    print(f"--- Indexando en: {base_dir} ---")
+    df = indexar(base_dir)
+    if df is None:
+        print("No hay datos.")
+        return
 
     df.to_csv(OUTPUT_CSV, index=False)
     print(f"[+] Éxito: {len(df)} simulaciones indexadas.")

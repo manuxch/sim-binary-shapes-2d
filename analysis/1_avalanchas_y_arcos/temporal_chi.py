@@ -57,6 +57,15 @@ T_MIN = None
 T_MAX = None
 
 
+def area_grano(radio, n_lados):
+    """Area de un grano de radio r: disco (n_lados = 1) o poligono regular
+    de n_lados con los vertices sobre la circunferencia de radio r."""
+    n = int(n_lados) if n_lados else 1
+    if n <= 2:
+        return np.pi * radio ** 2
+    return 0.5 * n * radio ** 2 * np.sin(2 * np.pi / n)
+
+
 def calcular_chi_temporal(row):
     """
     chi de salida (fraccion de area de chicos) por ventana de WINDOW_SIZE s.
@@ -92,7 +101,11 @@ def calcular_chi_temporal(row):
         return {**base, 'status': 'monodisperso_omitido'}, None
 
     radios = [g['radius'] for g in grain_info]
-    areas_unitarias = {i: np.pi * (g['radius'] ** 2) for i, g in enumerate(grain_info)}
+    # Area real de cada especie: los poligonos tienen los n vertices sobre la
+    # circunferencia de radio r (globalSetup.cpp), area (n/2) r^2 sin(2pi/n);
+    # los discos pi r^2. Antes se usaba pi r^2 para todos, lo que sesgaba
+    # chi_out en mezclas de formas distintas (ej. cuadrado-disco).
+    areas_unitarias = {i: area_grano(g['radius'], g.get('sides', 1)) for i, g in enumerate(grain_info)}
     tipo_chica = int(np.argmin(radios))
 
     flux_path = os.path.join(path, flux_filename)
@@ -286,7 +299,7 @@ def _segregacion_fila(row):
     info, d = calcular_chi_temporal(row)
     if d is None or not info.get('chi_nominal'):
         return None
-    meta = {k: row[k] for k in ('system_type', 'chi', 'area_ratio_nominal') if k in row}
+    meta = {k: row[k] for k in ('system_type', 'chi', 'area_ratio_nominal', 'w_salida') if k in row}
     return {**{k: info[k] for k in ('sim_hash', 'tirada', 'path')}, **meta,
             **medir_segregacion(d, info['chi_nominal'])}
 
@@ -295,6 +308,14 @@ def main():
     parser = argparse.ArgumentParser(
         description="Grafica chi de salida en funcion del tiempo para cada simulacion del index.")
     parser.add_argument('--index', default=INDEX_FILE, help='master_sim_index.csv')
+    parser.add_argument('--dir', default=None,
+                        help="carpeta de simulaciones a recorrer (ej. .../R_2.0/CUADRADOS); arma el indice "
+                             "en el momento con indexer.py y no usa --index")
+    parser.add_argument('--incluir', default=None,
+                        help="regex sobre la ruta de la simulacion: solo las que coinciden")
+    parser.add_argument('--out_csv', default=None,
+                        help="csv del --ranking (default: 5_graficos_finales/chi_temporal_ranking_segregacion.csv)")
+    parser.add_argument('--top', type=int, default=20, help="cuantas mostrar por pantalla en --ranking")
     parser.add_argument('--ventana', type=float, default=WINDOW_SIZE,
                         help='tamaño de la ventana temporal en segundos (default 10)')
     parser.add_argument('--formato', choices=['pdf', 'svg', 'png'], default=FORMATO,
@@ -326,11 +347,23 @@ def main():
     if (args.prefijo_viejo is None) != (args.prefijo_nuevo is None):
         raise SystemExit("--prefijo_viejo y --prefijo_nuevo van juntos.")
 
-    if not os.path.exists(args.index):
-        print(f"Error: No se encontró {args.index} para chi_temporal.")
-        return
-
-    df_idx = pd.read_csv(args.index)
+    if args.dir:
+        from indexer import indexar
+        print(f"Indexando {args.dir} ...")
+        df_idx = indexar(args.dir)
+        if df_idx is None:
+            raise SystemExit(f"No encontre simulaciones (carpetas con params.in) en {args.dir}")
+        print(f"  {len(df_idx)} simulaciones encontradas.")
+    else:
+        if not os.path.exists(args.index):
+            print(f"Error: No se encontró {args.index} para chi_temporal.")
+            return
+        df_idx = pd.read_csv(args.index)
+    if args.incluir:
+        df_idx = df_idx[df_idx['path'].astype(str).str.contains(args.incluir, regex=True)]
+        print(f"--incluir {args.incluir!r}: quedan {len(df_idx)} simulaciones.")
+        if df_idx.empty:
+            raise SystemExit("Ninguna simulacion coincide con --incluir.")
     # este proceso tambien usa las opciones (figura comparativa)
     _inicializar_worker(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato, args.t_min, args.t_max)
     if args.sistema:
@@ -362,15 +395,15 @@ def main():
             print("Ninguna simulacion se pudo calcular (revisar rutas / --prefijo_viejo).")
             return
         r = r.sort_values('desvio_medio_rel', ascending=False)
-        out_csv = os.path.join(rutas.GRAFICOS_FINALES_DIR, 'chi_temporal_ranking_segregacion.csv')
+        out_csv = args.out_csv or os.path.join(rutas.GRAFICOS_FINALES_DIR, 'chi_temporal_ranking_segregacion.csv')
         os.makedirs(os.path.dirname(out_csv), exist_ok=True)
         r.to_csv(out_csv, index=False)
         cols = [c for c in ('sim_hash', 'system_type', 'chi', 'area_ratio_nominal', 'tirada',
                             'desvio_medio_rel', 'desvio_max_rel', 'deriva_rel') if c in r.columns]
         print(f"Segregacion de chi_out respecto del nominal (media movil de {SUAVIZADO_BATCHES} ventanas), "
-              f"las 20 que mas segregan de {len(r)}:")
+              f"las {args.top} que mas segregan de {len(r)}:")
         with pd.option_context('display.width', 200):
-            print(r[cols].head(20).to_string(index=False, float_format='%.3f'))
+            print(r[cols].head(args.top).to_string(index=False, float_format='%.3f'))
         print(f"\nTabla completa: {out_csv}")
         print("Mediana de desvio_medio_rel: " f"{r['desvio_medio_rel'].median():.3f}")
         return
