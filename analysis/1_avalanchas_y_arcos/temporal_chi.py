@@ -120,6 +120,17 @@ def calcular_chi_temporal(row):
     if df_flux.empty:
         return {**base, 'status': 'flux_vacio'}, None
     df_flux.columns = ['tipo', 'tiempo']
+    # Lineas incompletas o corruptas (ej. la ultima, cortada al interrumpir la
+    # simulacion) se leen como NaN: se descartan y se informa cuantas eran.
+    df_flux = df_flux.apply(pd.to_numeric, errors='coerce')
+    n_total = len(df_flux)
+    df_flux = df_flux.dropna()
+    lineas_descartadas = n_total - len(df_flux)
+    if df_flux.empty:
+        return {**base, 'status': 'flux_vacio', 'detail': f'{lineas_descartadas} lineas invalidas'}, None
+    df_flux['tipo'] = df_flux['tipo'].astype(int)
+    if lineas_descartadas:
+        base['lineas_descartadas'] = lineas_descartadas
 
     # Chequeo de consistencia: los 'tipo' de flx.dat deben ser subset de
     # los índices 0..N-1 derivados de grain_json.
@@ -187,7 +198,7 @@ def analizar_flujo_temporal(row):
     info, df_plot = calcular_chi_temporal(row)
     if df_plot is None:
         return info
-    base = {k: info[k] for k in ('sim_hash', 'tirada', 'path')}
+    base = {k: info[k] for k in ('sim_hash', 'tirada', 'path', 'lineas_descartadas') if k in info}
     path, sim_hash, tirada, chi_nominal = info['path'], info['sim_hash'], info['tirada'], info['chi_nominal']
     if chi_nominal > 0:
         base.update(medir_segregacion(df_plot, chi_nominal))
@@ -300,7 +311,7 @@ def _segregacion_fila(row):
     if d is None or not info.get('chi_nominal'):
         return None
     meta = {k: row[k] for k in ('system_type', 'chi', 'area_ratio_nominal', 'w_salida') if k in row}
-    return {**{k: info[k] for k in ('sim_hash', 'tirada', 'path')}, **meta,
+    return {**{k: info[k] for k in ('sim_hash', 'tirada', 'path', 'lineas_descartadas') if k in info}, **meta,
             **medir_segregacion(d, info['chi_nominal'])}
 
 
@@ -435,6 +446,12 @@ def main():
         print(f"\n[{status}]")
         for e in ejemplos:
             print(f"  sim_hash={e['sim_hash']} tirada={e['tirada']} detail={e.get('detail', '')}")
+
+    con_descarte = [r for r in resultados if r.get('lineas_descartadas')]
+    if con_descarte:
+        print(f"\n--- flx.dat con lineas invalidas descartadas ({len(con_descarte)} simulaciones) ---")
+        for r in con_descarte:
+            print(f"  sim_hash={r['sim_hash']} tirada={r['tirada']}: {r['lineas_descartadas']} lineas  ({r['path']})")
 
     print(f"\n✅ Proceso terminado. {conteo.get('ok', 0)} gráficos generados de {len(df_idx)} filas.")
 
