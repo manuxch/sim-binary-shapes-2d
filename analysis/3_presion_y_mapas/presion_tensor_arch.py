@@ -17,7 +17,7 @@ import multiprocessing as mp
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # especies.py vive en analysis/
-from especies import especie_por_tipo  # noqa: E402
+from especies import especie_por_tipo
 
 # Altura extra de la ROI por encima del grano mas alto del arco (unidades de
 # simulacion; con el grano grande de radio 0.5, en diametros de grano grande).
@@ -126,18 +126,11 @@ def detectar_arco_primario(df_particles, df_contacts, r_salida):
     los tramos que son solo cimientos estables apoyados en el piso (no
     parte real del puente que sostiene la carga).
 
-    Puerto 1:1 de detectar_arco_primario() en graficar_arco_y_fuerzas.py,
-    para que la region 'arco' de este script coincida exactamente con lo
-    que dibuja ese script de referencia. A diferencia del criterio anterior
-    (componente conexa mas grande entre granos grandes con pos_y<15), este
-    no distingue grano grande/chico ni usa un corte fijo de altura: el
-    resultado es un puente delgado real, no todo el bloque congestionado
-    cerca de la salida.
     """
     if df_particles.empty or df_contacts.empty:
         return []
 
-    # Igual que el script de referencia: agrupamos por par de particulas,
+    # Agrupamos por par de particulas,
     # sumando f_norm de los (hasta 2) puntos de contacto de un mismo par,
     # para tener UNA arista por par tocandose (no una por punto de contacto).
     valid_c = df_contacts[(df_contacts['id_a'] >= 0) & (df_contacts['id_b'] >= 0)]
@@ -202,12 +195,7 @@ def detectar_arco_primario(df_particles, df_contacts, r_salida):
     nleft = idx[apoyado & (xs < 0.0)].tolist()
     nright = idx[apoyado & (xs > 0.0)].tolist()
 
-    # Antes: un Dijkstra (+ un has_path) por CADA par (izquierdo, derecho).
-    # Ahora: un solo Dijkstra por grano izquierdo, que da el costo y el
-    # camino a todos los derechos de una vez. El camino a cada destino es
-    # el mismo que devuelve nx.shortest_path(l, rr) (misma exploracion) y
-    # el costo es la misma suma en el mismo orden, asi que el arco elegido
-    # es identico, incluso en empates (misma iteracion y comparacion <).
+
     mejor_path = None
     min_costo_total = float('inf')
     for l in nleft:
