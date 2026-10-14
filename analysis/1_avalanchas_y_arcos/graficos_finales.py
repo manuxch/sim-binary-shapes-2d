@@ -89,6 +89,14 @@ def prepare_arcos(df_arcos: pd.DataFrame) -> pd.DataFrame:
     )
 
     out = df_arcos.copy()
+    # Relacion de aspecto = (L/2)/H: mitad del ancho (Span, distancia horizontal
+    # entre los centros de los granos de los extremos) sobre la altura (Altura,
+    # entre los centros mas alto y mas bajo). Se recalcula aca para no depender
+    # de la definicion con que se genero el csv (antes era H/L). Arcos con
+    # H = 0 (todos los centros a la misma altura) quedan sin valor.
+    altura = out['Altura'].astype(float)
+    out['Relacion_Aspecto'] = np.where(altura > 0, 0.5 * out['Span'].astype(float) / altura.where(altura > 0, 1.0),
+                                       np.nan)
     out['sistema'] = out['system_type'].map(SYSTEM_NAME_MAP)
     out = out.dropna(subset=['sistema'])
     return out
@@ -670,7 +678,7 @@ def plot_arch_geometry_deep_dive(df_stats: pd.DataFrame):
     ax.set_xticks(range(len(present)))
     ax.set_xticklabels(new_ticks, rotation=15)
     plt.xlabel(None)
-    plt.ylabel("Arch Aspect Ratio ($H/L$)")
+    plt.ylabel("Arch Aspect Ratio $L/2H$")
     anotar_chi(ax, target_chi)
     save_plot(f"13-arch-aspect-ratio-chi-{target_chi}")
 
@@ -708,7 +716,7 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
     df_filtered = df_filtered[(df_filtered['chi'] >= 0) & (df_filtered['chi'] <= 0.4)]
 
     metrics = {
-        'Relacion_Aspecto': 'Arch Aspect Ratio ($H/L$)',
+        'Relacion_Aspecto': 'Arch Aspect Ratio $L/2H$',
         'Tortuosidad': 'Arch Tortuosity',
     }
 
