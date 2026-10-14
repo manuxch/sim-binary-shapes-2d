@@ -404,8 +404,16 @@ def plot_sweeps_by_system(
         save_plot(nombre)
 
 
-def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15):
-    print(f"  -> Plotting 5a/b: Normalized Effects (R_a ~ {target_ar})...")
+def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15, total: bool = False):
+    """5a/5b: tamano medio de avalancha normalizado por el del sistema puro.
+    total=False: <s> = granos grandes por avalancha (S_mean).
+    total=True:  <s_T> = todos los granos, grandes + chicos (ST_mean); solo 5b,
+                 archivo 5b-matrix-normalized-total."""
+    mean_col, sem_col = ('ST_mean', 'ST_sem') if total else ('S_mean', 'S_sem')
+    if mean_col not in df.columns:
+        print(f"  [!] {mean_col} no esta en estadisticas_flujo_agregadas.csv: correr flow_analysis.py de nuevo.")
+        return
+    print(f"  -> Plotting 5{'b total' if total else 'a/b'}: Normalized Effects (R_a ~ {target_ar})...")
 
     df_mix = df[df['chi'] > 0].copy()
     if df_mix.empty:
@@ -413,16 +421,18 @@ def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15):
 
     main_dd = df_mix['D_d_sq'].value_counts().idxmax()
     df_puros = (
-        df[df['chi'] == 0][['grano_base', 'D_d_sq', 'S_mean', 'S_sem']]
-        .rename(columns={'S_mean': 'S0', 'S_sem': 'S0_err'})
+        df[df['chi'] == 0][['grano_base', 'D_d_sq', mean_col, sem_col]]
+        .rename(columns={mean_col: 'S0', sem_col: 'S0_err'})
     )
 
     df_norm = pd.merge(df_mix[df_mix['D_d_sq'] == main_dd], df_puros, on=['grano_base', 'D_d_sq'])
     if df_norm.empty:
         return
 
-    df_norm['log_S_norm'] = np.log((df_norm['S_mean'] / df_norm['S0']) + 1)
-    df_norm['log_S_norm_err'] = df_norm['S_sem'] / (df_norm['S_mean'] + df_norm['S0'])
+    df_norm['log_S_norm'] = np.log((df_norm[mean_col] / df_norm['S0']) + 1)
+    df_norm['log_S_norm_err'] = df_norm[sem_col] / (df_norm[mean_col] + df_norm['S0'])
+    ylabel = (r"$\ln(\langle s_{\rm T} \rangle / \langle s_{\rm T,0} \rangle + 1)$" if total
+              else r"$\ln(\langle s \rangle / \langle s_0 \rangle + 1)$")
 
     def draw(sistemas: List[str], filename: str):
         plt.figure()
@@ -449,13 +459,18 @@ def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15):
             )
 
         plt.xlabel(r"Concentration $\chi$")
-        plt.ylabel(r"$\ln(\langle s \rangle / \langle s_0 \rangle + 1)$")
-        plt.ylim(0.4, 2.5)
+        plt.ylabel(ylabel)
+        if not total:
+            plt.ylim(0.4, 2.5)
         plt.legend(loc='upper left')
         save_plot(filename)
 
+    matriz = ['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)']
+    if total:
+        draw(matriz, "5b-matrix-normalized-total")
+        return
     draw(['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)', 'Disco(G)-Tri(C)'], "5a-additive-normalized")
-    draw(['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)'], "5b-matrix-normalized")
+    draw(matriz, "5b-matrix-normalized")
 
 
 def plot_geometric_effects_raw(df: pd.DataFrame, target_ar: float = 0.15):
@@ -804,6 +819,7 @@ def main():
     plot_sweeps_by_system(df, sistemas_meta)
     plot_sweeps_by_system(df, sistemas_meta, zoom=True, xlim=(0.05, 0.15))
     plot_geometric_effects(df)
+    plot_geometric_effects(df, total=True)
     plot_geometric_effects_raw(df)
     plot_geometric_effects_linear(df)
 
