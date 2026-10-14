@@ -2,7 +2,7 @@
 
 Guía línea por línea del cálculo de presión `P` y esfuerzo de corte (deviador) `τ` por partícula en cada atasco. Los números de línea corresponden a `presion_tensor_arch.py` en este mismo directorio. Si el script cambia, actualizar esta tabla.
 
-El documento `presion_tensor_arch.md` explica la teoría general. Este README sigue el código.
+El documento `presion_tensor_arch.md` explica la teoría general. Este README sigue el código. La comparación con el material de clase (Born–Huang, círculo de Mohr, simetría por equilibrio de rotación) está en `README_tensor_vs_clases.md`.
 
 ---
 
@@ -197,7 +197,7 @@ Algunos trabajos llaman deviador a $q = \sigma_1-\sigma_2 = 2\tau$; conviene acl
 
 | Líneas | Qué hace |
 |---|---|
-| 494–496 | ROI: franja con `y` entre el grano más bajo del arco y el más alto **+ 10** (en metros: ~10 diámetros de grano grande). Sin arco: `[0, 20]`. |
+| 503–509 | ROI: granos que no son del arco con el centro en la franja `y` entre el grano más bajo y el más alto del arco, de pared a pared, más `--roi_extra` por encima (default 0; antes era 10, ~10 diámetros de grano grande). Es la misma franja que usa `force_arch_v4.py` para los contactos. Sin arco: `[0, 20]` (esos atascos se descartan igual). |
 | 498–499 | `region = 'arco'` si está en el arco; si no, `'roi'` si está en la franja; si no, `'bulk'`. |
 | 501–502 | `tipo = 'B'` (grande) si `r_nominal ≥ umbral_r`; si no, `'S'` (chico). |
 

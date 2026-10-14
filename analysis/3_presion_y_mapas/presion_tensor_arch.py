@@ -19,6 +19,11 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # especies.py vive en analysis/
 from especies import especie_por_tipo  # noqa: E402
 
+# Altura extra de la ROI por encima del grano mas alto del arco (unidades de
+# simulacion; con el grano grande de radio 0.5, en diametros de grano grande).
+# Antes era 10.0; ahora 0 por defecto (--roi_extra), igual que force_arch_v4.py.
+ROI_EXTRA = 0.0
+
 CHI_REGEX = re.compile(r'(?:Chi_|_X)([0-9]+(?:p[0-9]+)?)')
 
 def poly_area(coords):
@@ -495,9 +500,13 @@ def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, 
     p_df['sigma_yy_reducida'] = syy / g
     p_df['sigma_xy_reducida'] = sxy / g
     
+    # ROI: granos que no son del arco con el centro en la franja horizontal
+    # [y_min, y_max + ROI_EXTRA] del arco (y_min, y_max = centros mas bajo y
+    # mas alto del arco), de pared a pared. Con ROI_EXTRA = 0 (default) es la
+    # misma franja que usa force_arch_v4.py para los contactos.
     y_arco = p_df.loc[p_df.index.isin(arco_path), 'pos_y'] if arco_path else []
     roi_ymin = y_arco.min() if len(y_arco) > 0 else 0
-    roi_ymax = y_arco.max() + 10.0 if len(y_arco) > 0 else 20.0
+    roi_ymax = y_arco.max() + ROI_EXTRA if len(y_arco) > 0 else 20.0
     
     p_df['region'] = np.where(p_df.index.isin(arco_path), 'arco',
                      np.where((p_df['pos_y'] >= roi_ymin) & (p_df['pos_y'] <= roi_ymax), 'roi', 'bulk'))
@@ -550,6 +559,12 @@ def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, 
 
     del p_df
     return res, particulas
+
+def _fijar_roi_extra(valor):
+    # los procesos del Pool no siempre heredan lo que main() cambia: se pasa explicito
+    global ROI_EXTRA
+    ROI_EXTRA = float(valor)
+
 
 def worker_wrapper(args):
     return process_one_jam_task(*args)
@@ -918,6 +933,9 @@ def main():
     parser.add_argument("--master", required=True)
     parser.add_argument("--workers", type=int, default=os.cpu_count() or 4)
     parser.add_argument("--dt", type=float, default=0.001)
+    parser.add_argument("--roi_extra", type=float, default=ROI_EXTRA,
+                        help="altura extra de la ROI por encima del grano mas alto del arco "
+                             "(unidades de simulacion; default 0: solo la franja del arco). Antes era 10.")
     parser.add_argument("--filas_lote", type=int, default=500_000,
                         help="filas de particulas por lote guardado (default 500000)")
     parser.add_argument("--reanudar", action="store_true",
@@ -973,7 +991,10 @@ def main():
         gc.collect()
 
     tareas = generar_tareas(pares, master_dict, args.dt)
-    with mp.Pool(processes=args.workers, maxtasksperchild=50) as pool:
+    _fijar_roi_extra(args.roi_extra)
+    print(f"ROI: franja del arco + {args.roi_extra:g} por encima del grano mas alto", flush=True)
+    with mp.Pool(processes=args.workers, maxtasksperchild=50,
+                 initializer=_fijar_roi_extra, initargs=(args.roi_extra,)) as pool:
         for xy, res in pool.imap_unordered(worker_wrapper_con_ruta, tareas, chunksize=4):
             procesados += 1
             xy_buf.append(xy)   # tambien los fallidos: no tiene sentido reintentarlos
