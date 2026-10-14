@@ -2,7 +2,7 @@
 
 Guía línea por línea del cálculo de presión `P` y esfuerzo de corte (deviador) `τ` por partícula en cada atasco. Los números de línea corresponden a `presion_tensor_arch.py` en este mismo directorio. Si el script cambia, actualizar esta tabla.
 
-El documento `presion_tensor_arch.md` explica la teoría general. Este README sigue el código.
+El documento `presion_tensor_arch.md` explica la teoría general. Este README sigue el código. La comparación con el material de clase (Born–Huang, círculo de Mohr, simetría por equilibrio de rotación) está en `README_tensor_vs_clases.md`.
 
 ---
 
