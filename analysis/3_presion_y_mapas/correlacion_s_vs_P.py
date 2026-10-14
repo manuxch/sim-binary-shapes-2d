@@ -21,7 +21,7 @@ La simulacion se empareja por las dos ultimas carpetas de la ruta
 calcularon con el disco montado en rutas distintas.
 
 Salida (en processed_data/5_graficos_finales/ por defecto):
-  16-s-vs-P-<region>[-<sistema>]-ratio-<r>-W-<W>.pdf  y  ..._datos.csv con los valores graficados.
+  16-s-vs-P-<region>-ratio-<r>-W-<W>.pdf  y  ..._datos.csv con los valores graficados.
 En la leyenda va la razon de areas R_a; el coeficiente de Pearson r de cada
 sistema solo se imprime por pantalla (con --logy, se calcula con log<s>).
 
@@ -70,16 +70,6 @@ def clave_carpeta(ruta):
     """Las dos ultimas carpetas de una ruta: 'BARRIDO_X/Chi_0p2_W_2p0'."""
     partes = os.path.normpath(str(ruta)).replace('\\', '/').rstrip('/').split('/')
     return '/'.join(partes[-2:])
-
-
-def etiqueta_sistemas(sistemas):
-    """'-cuadg-discoc' para --sistemas Cuad-Disco (mismo estilo que los
-    nombres 4-cuadg-discoc-... de graficos_finales.py); '' si no se filtra."""
-    if not sistemas:
-        return ''
-    ids = [SYSTEM_NAME_MAP.get(str(x), str(x)).lower().replace('(', '').replace(')', '')
-           for x in sistemas]
-    return '-' + '_'.join(ids)
 
 
 def presion_por_simulacion(path_csv, magnitud, region):
@@ -255,7 +245,7 @@ def main():
                          'color y marcador por sistema)')
     ap.add_argument('--sin_error', action='store_true', help='sin barras de error')
     ap.add_argument('--out', default=None,
-                    help='pdf de salida (default: 5_graficos_finales/16-s-vs-<P|tau>-<region>[-<sistema>]-ratio-<r>-W-<W>.pdf)')
+                    help='pdf de salida (default: 5_graficos_finales/16-s-vs-<P|tau>-<region>-ratio-<r>-W-<W>.pdf)')
     args = ap.parse_args()
     if args.loglog:
         args.logx = args.logy = True
@@ -277,10 +267,7 @@ def main():
     df = df[np.isclose(df['W'], args.W)]
     df = df[df['chi'] <= args.chi_max]
     if args.sistemas:
-        # se conservan tambien las puras del mismo grano grande (ej. 'Cuad'
-        # para 'Cuad-Disco'): agregar_puros() las usa como punto chi = 0
-        permitidos = set(args.sistemas) | {str(x).split('-')[0] for x in args.sistemas}
-        df = df[df['system_type'].isin(permitidos)]
+        df = df[df['system_type'].isin(args.sistemas)]
     df = df.dropna(subset=['P', 's'])
     df = agregar_puros(df)
     if df.empty:
@@ -289,8 +276,7 @@ def main():
 
     out = args.out or os.path.join(
         rutas.GRAFICOS_FINALES_DIR,
-        f"16-s-vs-{args.magnitud}-{args.region}{etiqueta_sistemas(args.sistemas)}"
-        f"-ratio-{args.area_ratio:g}-W-{args.W:g}"
+        f"16-s-vs-{args.magnitud}-{args.region}-ratio-{args.area_ratio:g}-W-{args.W:g}"
         f"{'-loglog' if args.logx and args.logy else '-logx' if args.logx else '-logy' if args.logy else ''}.pdf")
     datos = os.path.splitext(out)[0] + '_datos.csv'
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
