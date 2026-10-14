@@ -696,6 +696,24 @@ def plot_arch_geometry_deep_dive(df_stats: pd.DataFrame):
     save_plot(f"14-arch-height-boxplot-chi-{target_chi}")
 
 
+def aspecto_medio(g, n_boot=500, seed=0):
+    """Relacion de aspecto del arco medio, <L>/(2<H>), y su error estandar por
+    bootstrap sobre los arcos (remuestreo con reposicion). Usa Span (L) y
+    Altura (H) de cada arco."""
+    L = g['Span'].to_numpy(float)
+    H = g['Altura'].to_numpy(float)
+    ok = np.isfinite(L) & np.isfinite(H)
+    L, H = L[ok], H[ok]
+    n = len(L)
+    if n == 0 or H.mean() <= 0:
+        return {'mean': np.nan, 'sem': np.nan, 'count': n}
+    valor = L.mean() / (2.0 * H.mean())
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, n, size=(n_boot, n))
+    boot = L[idx].mean(axis=1) / (2.0 * H[idx].mean(axis=1))
+    return {'mean': valor, 'sem': float(np.std(boot, ddof=1)), 'count': n}
+
+
 def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
     """Gráfico 15: evolución de relación de aspecto y tortuosidad vs chi."""
     if not os.path.exists(CFG.arcos_path):
@@ -716,7 +734,7 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
     df_filtered = df_filtered[(df_filtered['chi'] >= 0) & (df_filtered['chi'] <= 0.4)]
 
     metrics = {
-        'Relacion_Aspecto': 'Arch Aspect Ratio $L/2H$',
+        'Relacion_Aspecto': r'Arch Aspect Ratio $\langle L\rangle / 2\langle H\rangle$',
         'Tortuosidad': 'Arch Tortuosity',
     }
 
@@ -727,12 +745,19 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
             if group.empty:
                 continue
 
-            summary = group.groupby('chi')[metric].agg(['mean', 'std', 'count']).reset_index()
+            if metric == 'Relacion_Aspecto':
+                # Cociente de promedios <L>/(2<H>), no promedio de L/2H: un arco
+                # casi plano (H ~ 0) da L/2H enorme y dominaba media y error.
+                summary = (group.groupby('chi')
+                           .apply(lambda g: pd.Series(aspecto_medio(g)), include_groups=False)
+                           .reset_index())
+            else:
+                summary = group.groupby('chi')[metric].agg(['mean', 'std', 'count']).reset_index()
+                summary['sem'] = summary['std'] / np.sqrt(summary['count'])
             summary = summary[summary['count'] >= 20]
             if summary.empty:
                 continue
 
-            summary['sem'] = summary['std'] / np.sqrt(summary['count'])
             color, marker = CFG.system_style.get(sys_name, ('black', 'o'))
             plt.errorbar(
                 summary['chi'], summary['mean'], yerr=summary['sem'],
