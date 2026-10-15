@@ -77,12 +77,12 @@ El repo se clona en WSL; los datos pesados viven en Windows (y Google Drive los 
 ```bash
 git clone https://github.com/montero-j/sim-binary-shapes-2d.git ~/work/lab/project/sim-binary-shapes-2d
 cd ~/work/lab/project/sim-binary-shapes-2d
-export PROYECTO_WIN="/mnt/c/Users/<usuario>/work/lab/project/sim-binary-shapes-2d"   # carpeta del proyecto en Windows
+export PROYECTO_WIN="/mnt/c/Users/<usuario>/OneDrive/work/lab/project/sim-binary-shapes-2d"   # carpeta del proyecto en Windows
 bash setup/enlazar_datos.sh "$PROYECTO_WIN"          # enlaza datos_simulaciones, csv, parquet...
 mkdir -p ~/bin && cp setup/git-pushsync ~/bin/       # 'git pushsync' = push + copia del código a Windows
 ```
 
-`PROYECTO_WIN` y `export PATH="$HOME/bin:$PATH"` van en `~/.bashrc`. Después de cada commit, `git pushsync` en lugar de `git push`.
+`PROYECTO_WIN` y `export PATH="$HOME/bin:$PATH"` van en `~/.bashrc`. Si la carpeta de Windows cambia de lugar, `setup/reubicar_enlaces.sh <viejo> <nuevo>` actualiza los enlaces. Después de cada commit, `git pushsync` en lugar de `git push`.
 
 ## Notas
 
