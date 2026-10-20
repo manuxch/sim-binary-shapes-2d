@@ -93,7 +93,7 @@ def preparar(idx_path, av_path, solo_con_arco):
     av = pd.read_csv(av_path)
     if solo_con_arco:
         if 'atasco_id' not in av.columns:
-            sys.exit("[!] El esqueleto no tiene atasco_id: volve a correr processor.py (version nueva).")
+            sys.exit("[!] El esqueleto no tiene atasco_id: correr processor.py --emparejar.")
         n0 = len(av)
         av = av[av['atasco_id'].notna()].copy()
         print(f"--solo_con_arco: {len(av)} de {n0} avalanchas tienen un atasco (arco) asociado.")

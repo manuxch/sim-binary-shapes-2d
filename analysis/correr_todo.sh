@@ -8,7 +8,7 @@
 #
 # Pasos (en este orden):
 #   avalanchas  main_pipeline.py: indice, avalanchas, arcos, estadisticas de flujo
-#   extras      avalanchas con arco, estadisticas --solo_con_arco, masa de avalancha
+#   extras      masa de avalancha (grandes, chicos, total)
 #   figuras     graficos_finales.py (todas las figuras 2-15)
 #   segregacion temporal_chi.py --ranking
 #   fuerzas     force_arch_v4.py + un pdf por geometria/ratio
@@ -51,9 +51,7 @@ if quiere avalanchas; then
 fi
 
 if quiere extras; then
-    titulo "2. Avalanchas con arco y masa de avalancha"
-    py "$DIR/1_avalanchas_y_arcos/emparejar_avalanchas_arcos.py"
-    py "$DIR/1_avalanchas_y_arcos/flow_analysis.py" --solo_con_arco
+    titulo "2. Masa de avalancha"
     py "$DIR/1_avalanchas_y_arcos/graficar_masa_avalancha.py" \
         --sistemas Disco-Disco Tri-Disco Cuad-Disco Pent-Disco Oct-Disco --area_ratio 0.1
 fi

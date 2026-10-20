@@ -34,7 +34,7 @@ import rutas  # noqa: E402
 def emparejar(av_path, arcos_path):
     av = pd.read_csv(av_path)
     if 'atasco_id' not in av.columns:
-        sys.exit("[!] El esqueleto no tiene la columna atasco_id: volve a correr processor.py (version nueva).")
+        sys.exit("[!] El esqueleto no tiene la columna atasco_id: correr processor.py --emparejar.")
     arc = pd.read_csv(arcos_path)
     arc = arc[pd.to_numeric(arc['Atasco_ID'], errors='coerce').notna()].copy()
     arc['atasco_id'] = arc['Atasco_ID'].astype(int)

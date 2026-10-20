@@ -65,7 +65,7 @@ def main(idx_path=IDX_PATH, av_path=AV_PATH, solo_con_arco=False):
         # Solo avalanchas que terminaron en un atasco guardado (atasco_XXXXX.xy),
         # es decir, con un arco asociado (ver processor.py, columna atasco_id).
         if 'atasco_id' not in df_av.columns:
-            return print("El esqueleto no tiene atasco_id: volve a correr processor.py (version nueva).")
+            return print("El esqueleto no tiene atasco_id: correr processor.py --emparejar.")
         n0 = len(df_av)
         df_av = df_av[df_av['atasco_id'].notna()].copy()
         print(f"--solo_con_arco: {len(df_av)} de {n0} avalanchas tienen un atasco (arco) asociado.")

@@ -14,6 +14,10 @@ GRID_NX, GRID_NY = 50, 150
 TIME_STEP = 0.001
 
 PREPRO_DIR = "0_mapa_prepro"
+# Emparejar cada avalancha con el atasco (arco) que la detuvo: apagado por
+# defecto. Se prende con --emparejar (agrega atasco_id / emparejado_ok, que
+# usan flow_analysis.py --solo_con_arco y emparejar_avalanchas_arcos.py).
+EMPAREJAR = False
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))  # rutas.py vive en analysis/
 import rutas
@@ -74,8 +78,9 @@ def contar_atascos_en_disco(sim_path, dir_id=''):
     return 0
 
 
-def process_everything(sim_row):
-    """Procesa una simulación: avalanchas y, opcionalmente, mapas."""
+def process_everything(sim_row, emparejar=None):
+    """Procesa una simulación: avalanchas y, opcionalmente, su atasco."""
+    emparejar = EMPAREJAR if emparejar is None else emparejar
     try:
         path = sim_row['path']
         s_hash = sim_row['sim_hash']
@@ -112,6 +117,22 @@ def process_everything(sim_row):
                     tot += 1
                     big += (tipo == target_id)
                 rachas.append((t0, t_ult, big, tot))
+
+                if not emparejar:
+                    for a0, a1, big, tot in rachas:
+                        if big > 0:
+                            avalanchas.append({
+                                'sim_hash': s_hash,
+                                'config_hash': config_hash,
+                                'tirada': sim_row['tirada'],
+                                'duracion': a1 - a0,
+                                'tamano_big': big,
+                                'total_mix': tot,
+                                'radio_salida': sim_row.get('Radio_salida', np.nan),
+                                't_inicio': a0,
+                                't_fin': a1,
+                            })
+                    return avalanchas
 
                 # 2) Atascos guardados en el hueco despues de cada racha. El simulador
                 #    declara atasco a los DT_THRESHOLD s sin granos y, si siguen sin
@@ -164,7 +185,12 @@ def process_everything(sim_row):
         return []
 
 
-def main():
+def _inicializar_worker(emparejar):
+    global EMPAREJAR
+    EMPAREJAR = emparejar
+
+
+def main(emparejar=False):
     os.makedirs(DATA_DIR, exist_ok=True)
 
     if not os.path.exists(IDX_PATH):
@@ -172,9 +198,10 @@ def main():
         return
 
     df_idx = pd.read_csv(IDX_PATH)
-    print(f"--- PROCESANDO {len(df_idx)} SIMULACIONES ---")
+    print(f"--- PROCESANDO {len(df_idx)} SIMULACIONES ---"
+          + (" (emparejando avalanchas con atascos)" if emparejar else ""))
 
-    with Pool(cpu_count()) as pool:
+    with Pool(cpu_count(), initializer=_inicializar_worker, initargs=(emparejar,)) as pool:
         results = pool.map(process_everything, df_idx.to_dict('records'))
 
     all_av = [item for sublist in results if sublist for item in sublist]
@@ -188,4 +215,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    ap = argparse.ArgumentParser(description="Avalanchas de cada simulacion (desde flx.dat).")
+    ap.add_argument('--emparejar', action='store_true',
+                    help="asocia cada avalancha con el atasco_XXXXX.xy que la detuvo (columna atasco_id)")
+    main(emparejar=ap.parse_args().emparejar)
