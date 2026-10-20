@@ -25,6 +25,8 @@ SYSTEM_STYLE = {
     'Tri(G)-Disco(C)':   ('#009E73', '^'),
     'Cuad(G)-Disco(C)':  ('#56B4E9', 's'),
     'Pent(G)-Disco(C)':  ('#0072B2', 'p'),
+    'Oct(G)-Disco(C)':   ('#999999', '8'),
+    'Disco(G)-Oct(C)':   ('#F0E442', '8'),
 }
 
 ENGLISH_LABELS = {
@@ -35,6 +37,8 @@ ENGLISH_LABELS = {
     'Tri(G)-Disco(C)':   'Triangle-Disk',
     'Cuad(G)-Disco(C)':  'Square-Disk',
     'Pent(G)-Disco(C)':  'Pentagon-Disk',
+    'Oct(G)-Disco(C)':   'Octagon-Disk',
+    'Disco(G)-Oct(C)':   'Disk-Octagon',
 }
 
 # system_type del master_sim_index.csv -> nombre interno
@@ -46,10 +50,13 @@ SYSTEM_NAME_MAP = {
     'Tri-Disco':   'Tri(G)-Disco(C)',
     'Cuad-Disco':  'Cuad(G)-Disco(C)',
     'Pent-Disco':  'Pent(G)-Disco(C)',
+    'Oct-Disco':   'Oct(G)-Disco(C)',
+    'Disco-Oct':   'Disco(G)-Oct(C)',
     'Disco':       'Disco(G)',
     'Tri':         'Tri(G)',
     'Cuad':        'Cuad(G)',
     'Pent':        'Pent(G)',
+    'Oct':         'Oct(G)',
 }
 
 # Forma del grano grande (como aparece en forma_grande / nombres de parquet)
@@ -60,6 +67,7 @@ SHAPE_STYLE = {
     'Triangulo': ('Triangle', '^'),
     'Cuadrado':  ('Square',   's'),
     'Pentagono': ('Pentagon', 'p'),
+    'Octogono':  ('Octagon',  '8'),
 }
 
 # Regiones (comparar_presion_por_chi.py): vermillion arco, azul roi (Wong)

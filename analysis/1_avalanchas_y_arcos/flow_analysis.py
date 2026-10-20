@@ -15,7 +15,7 @@ def get_detailed_system_name(row):
     try:
         grains = json.loads(row['grain_json'])
         gs = sorted(grains, key=lambda x: float(x['radius']), reverse=True)
-        nombres = {1: "Disco", 3: "Tri", 4: "Cuad", 5: "Pent"}
+        nombres = {1: "Disco", 3: "Tri", 4: "Cuad", 5: "Pent", 6: "Hex", 8: "Oct"}
         n1 = nombres.get(int(gs[0]['sides']), "Pol")
         n2 = nombres.get(int(gs[1]['sides']), "Pol") if len(gs) > 1 else "Puro"
         return f"{n1}(G)-{n2}(C)"

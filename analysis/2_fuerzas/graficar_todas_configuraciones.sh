@@ -8,8 +8,9 @@
 CONTENEDOR="${CONTENEDOR:-/home/juli/work/lab/containers/workstation_full.sif}"  # se puede cambiar con: export CONTENEDOR=/ruta/al.sif
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$DIR/../.." && pwd)"
-ARCHIVO_CSV="$REPO_DIR/processed_data/fuerzas/datos_v4/resumen_fuerza_normal_por_configuracion.csv"
-CARPETA_SALIDA="$REPO_DIR/processed_data/fuerzas/pdf_v4"
+RESULTADOS_DIR="${RESULTADOS_DIR:-$REPO_DIR}"  # igual que analysis/rutas.py
+ARCHIVO_CSV="$RESULTADOS_DIR/processed_data/fuerzas/datos_v4/resumen_fuerza_normal_por_configuracion.csv"
+CARPETA_SALIDA="$RESULTADOS_DIR/processed_data/fuerzas/pdf_v4"
 
 mkdir -p "$CARPETA_SALIDA"
 cd "$DIR" || exit 1

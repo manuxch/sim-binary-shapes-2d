@@ -160,7 +160,7 @@ def parse_params(filepath, folder_path):
                 4,
             )
 
-            nombres = {1: "Disco", 3: "Tri", 4: "Cuad", 5: "Pent"}
+            nombres = {1: "Disco", 3: "Tri", 4: "Cuad", 5: "Pent", 6: "Hex", 8: "Oct"}
             n1 = nombres.get(gs[0]['sides'], "Pol")
 
             if len(gs) >= 2:
@@ -230,7 +230,7 @@ def main(base_dir=ROOT_DIR):
         t_match = re.search(r'TIRADA(\d+)', root, re.IGNORECASE)
         p['tirada'] = int(t_match.group(1)) if t_match else 1
 
-        cat_match = re.search(r'(BARRIDO_[^/]+|DISK_DISK_[^/]+)', root)
+        cat_match = re.search(r'(BARRIDO_[^/]+|MEZCLA_[^/]+|DISK_DISK_[^/]+)', root)
         p['category'] = cat_match.group(0) if cat_match else "General"
 
         p['path'] = root

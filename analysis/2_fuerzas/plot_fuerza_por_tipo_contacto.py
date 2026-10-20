@@ -75,8 +75,9 @@ if not configs:
     sys.exit(1)
 
 # El CSV de entrada (salida de force_arch_v4.py) vive en processed_data/fuerzas/datos_v4/
-REPO_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-archivo_in = os.path.join(REPO_DIR, "processed_data", "fuerzas", "datos_v4", "resumen_fuerza_normal_por_configuracion.csv")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # rutas.py vive en analysis/
+import rutas  # noqa: E402
+archivo_in = os.path.join(rutas.FUERZAS_DIR, "datos_v4", "resumen_fuerza_normal_por_configuracion.csv")
 if not os.path.exists(archivo_in):
     print(f"Error: No se encuentra el archivo {archivo_in}")
     sys.exit(1)

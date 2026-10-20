@@ -61,7 +61,7 @@ def nominalizar_ratio(x, ndigits=3):
 def shape_name_from_sides(sides):
     try: sides = int(sides)
     except Exception: return "Desconocido"
-    return {1: "Disco", 3: "Tri", 4: "Cuad", 5: "Pent"}.get(sides, f"Pol{sides}")
+    return {1: "Disco", 3: "Tri", 4: "Cuad", 5: "Pent", 6: "Hex", 8: "Oct"}.get(sides, f"Pol{sides}")
 
 def get_geometry_label_from_row(row):
     # Intento 1: Tratar de extraerlo del JSON de granos

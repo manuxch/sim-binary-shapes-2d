@@ -30,6 +30,7 @@ def nombre_forma(n_sides):
     if n == 4: return "Cuadrado"
     if n == 5: return "Pentagono"
     if n == 6: return "Hexagono"
+    if n == 8: return "Octogono"
     return f"Poli{n}"
 
 def parse_xy(filename):
