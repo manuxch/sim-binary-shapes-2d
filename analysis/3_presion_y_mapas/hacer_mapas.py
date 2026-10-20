@@ -87,6 +87,14 @@ def main():
     ap.add_argument('--solo_graficar', action='store_true',
                     help='no genera frames: solo regrafica los .npz con escala comun')
     args = ap.parse_args()
+    if not args.solo_graficar:
+        faltan = [F for F in args.formas
+                  if not os.path.exists(os.path.join(args.datos, f"presion_por_particula_{F}.parquet"))]
+        for F in faltan:
+            print(f"  [!] {F}: no hay presion_por_particula_{F}.parquet en {args.datos}, se saltea", flush=True)
+        args.formas = [F for F in args.formas if F not in faltan]
+        if not args.formas:
+            sys.exit(f"Ninguna forma tiene datos en {args.datos}")
 
     py = sys.executable
     barrido = os.path.join(AQUI, 'barrido_heatmap.py')
