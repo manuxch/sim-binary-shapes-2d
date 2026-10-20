@@ -265,15 +265,32 @@ def indexar(base_dir):
     return df[existentes + [c for c in df.columns if c not in existentes]]
 
 
-def main(base_dir=ROOT_DIR):
-    print(f"--- Indexando en: {base_dir} ---")
-    df = indexar(base_dir)
-    if df is None:
+def main(base_dir=None):
+    """Indexa base_dir, o si no se da, todas las carpetas de SIM_DATA_DIR
+    (pueden ser varias separadas por ':', ver rutas.py) en un solo indice."""
+    dirs = [base_dir] if base_dir else rutas.SIM_DATA_DIRS
+    partes = []
+    for d in dirs:
+        print(f"--- Indexando en: {d} ---")
+        if not os.path.isdir(d):
+            print(f"  [!] No existe (o el contenedor no la ve): {d}")
+            continue
+        df_d = indexar(d)
+        if df_d is None:
+            print("  [!] Sin simulaciones (ninguna carpeta con params.in).")
+            continue
+        print(f"  {len(df_d)} simulaciones")
+        partes.append(df_d)
+    if not partes:
         print("No hay datos.")
         return
 
+    df = pd.concat(partes, ignore_index=True).drop_duplicates(subset='sim_hash')
+    os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
     df.to_csv(OUTPUT_CSV, index=False)
     print(f"[+] Éxito: {len(df)} simulaciones indexadas.")
+    if 'system_type' in df.columns:
+        print("    por sistema: " + ", ".join(f"{k}: {v}" for k, v in df['system_type'].value_counts().items()))
     print(f"[+] Guardado en: {OUTPUT_CSV}")
 
 

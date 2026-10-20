@@ -27,11 +27,15 @@ import os
 
 REPO_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-# Datos crudos de simulacion (carpetas BARRIDO_*/Chi_*_W_*/frames_*)
-SIM_DATA_DIR = os.environ.get(
+# Datos crudos de simulacion (carpetas BARRIDO_*/Chi_*_W_*/frames_*).
+# SIM_DATA_DIR puede tener varias carpetas separadas por ':' (indexer.py
+# las recorre todas), ej. los barridos del repo + otra carpeta con mezclas:
+#     export SIM_DATA_DIR=/ruta/R_2.0:/mnt/c/Users/Juli/Downloads/otra/simulation_data
+SIM_DATA_DIRS = [d for d in os.environ.get(
     "SIM_DATA_DIR",
     os.path.join(REPO_DIR, "datos_simulaciones", "simulation_data", "R_2.0"),
-)
+).split(os.pathsep) if d]
+SIM_DATA_DIR = SIM_DATA_DIRS[0]
 
 # Raiz de los resultados: el repo, o RESULTADOS_DIR si esta definida
 RESULTADOS_DIR = os.path.abspath(os.environ.get("RESULTADOS_DIR", REPO_DIR))

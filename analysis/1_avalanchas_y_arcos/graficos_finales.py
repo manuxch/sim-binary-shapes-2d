@@ -465,11 +465,11 @@ def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15, total: boo
         plt.legend(loc='upper left')
         save_plot(filename)
 
-    matriz = ['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)']
+    matriz = ['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Oct(G)-Disco(C)']
     if total:
         draw(matriz, "5b-matrix-normalized-total")
         return
-    draw(['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)', 'Disco(G)-Tri(C)'], "5a-additive-normalized")
+    draw(['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)', 'Disco(G)-Tri(C)', 'Disco(G)-Oct(C)'], "5a-additive-normalized")
     draw(matriz, "5b-matrix-normalized")
 
 
@@ -478,7 +478,7 @@ def plot_geometric_effects_raw(df: pd.DataFrame, target_ar: float = 0.15):
     main_dd = df['D_d_sq'].value_counts().idxmax()
 
     plt.figure()
-    for sis in ['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)']:
+    for sis in ['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Oct(G)-Disco(C)']:
         grp = filter_standard_size(df[df['D_d_sq'] == main_dd], target_ar, 0.07)
         grp_sis = (
             grp[grp['sistema'] == sis]
@@ -546,8 +546,8 @@ def plot_geometric_effects_linear(df: pd.DataFrame, target_ar: float = 0.15):
         plt.legend(loc='upper left')
         save_plot(filename)
 
-    draw_lin(['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)', 'Disco(G)-Tri(C)'], "11a-additive-linear")
-    draw_lin(['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)'], "11b-matrix-linear")
+    draw_lin(['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)', 'Disco(G)-Tri(C)', 'Disco(G)-Oct(C)'], "11a-additive-linear")
+    draw_lin(['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Oct(G)-Disco(C)'], "11b-matrix-linear")
 
 # =============================================================================
 # GRÁFICOS DE ARCOS
@@ -561,7 +561,7 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
     print("\n[+] Starting Arch Analysis (Target chi = 0.2)...")
     df_arcos = prepare_arcos(pd.read_csv(CFG.arcos_path))
 
-    matrix_systems = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)']
+    matrix_systems = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Oct(G)-Disco(C)']
     df_filtered = df_arcos[df_arcos['sistema'].isin(matrix_systems)].copy()
 
     # Filtro general: disco-disco usa R_a nominal ~0.1; el resto target_ar ~0.15.
@@ -657,7 +657,7 @@ def plot_arch_geometry_deep_dive(df_stats: pd.DataFrame):
     print("[+] Generando Geometría de Arcos (chi = 0.2)...")
     df_arcos = prepare_arcos(pd.read_csv(CFG.arcos_path))
 
-    matrix_systems = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)']
+    matrix_systems = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Oct(G)-Disco(C)']
     target_chi = 0.2
     df_plot = df_arcos[
         (df_arcos['sistema'].isin(matrix_systems)) &
@@ -737,7 +737,7 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
     print("[+] Generando Evolución (vs Chi) - Solo métricas clave...")
     df_arcos = prepare_arcos(pd.read_csv(CFG.arcos_path))
 
-    matrix_systems = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)']
+    matrix_systems = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Oct(G)-Disco(C)']
     df_filtered = filter_standard_size(
         df_arcos[df_arcos['sistema'].isin(matrix_systems)],
         0.15,
@@ -805,11 +805,13 @@ def main():
     # Limpieza: sistema fuera del estudio actual.
     df = df[df['sistema'] != 'Cuad(G)-Cuad(C)']
 
-    # Orden de los sistemas: Triangle, Square, Pentagon y Disk-Disk al final.
+    # Orden de los sistemas: Triangle, Square, Pentagon, Octagon y Disk-Disk al final.
+    # (los que no tienen datos se saltean)
     sistemas_meta = [
         ('Tri(G)-Disco(C)', 'Triangle'),
         ('Cuad(G)-Disco(C)', 'Square'),
         ('Pent(G)-Disco(C)', 'Pentagon'),
+        ('Oct(G)-Disco(C)', 'Octagon'),
         ('Disco(G)-Disco(C)', 'Disk'),
     ]
 
