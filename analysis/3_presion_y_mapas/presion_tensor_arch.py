@@ -14,6 +14,15 @@ import gc
 import time
 import collections
 import multiprocessing as mp
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # especies.py vive en analysis/
+from especies import especie_por_tipo
+
+# Altura extra de la ROI por encima del grano mas alto del arco (unidades de
+# simulacion; con el grano grande de radio 0.5, en diametros de grano grande).
+# Antes era 10.0; ahora 0 por defecto (--roi_extra), igual que force_arch_v4.py.
+ROI_EXTRA = 0.0
 
 CHI_REGEX = re.compile(r'(?:Chi_|_X)([0-9]+(?:p[0-9]+)?)')
 
@@ -118,18 +127,11 @@ def detectar_arco_primario(df_particles, df_contacts, r_salida):
     los tramos que son solo cimientos estables apoyados en el piso (no
     parte real del puente que sostiene la carga).
 
-    Puerto 1:1 de detectar_arco_primario() en graficar_arco_y_fuerzas.py,
-    para que la region 'arco' de este script coincida exactamente con lo
-    que dibuja ese script de referencia. A diferencia del criterio anterior
-    (componente conexa mas grande entre granos grandes con pos_y<15), este
-    no distingue grano grande/chico ni usa un corte fijo de altura: el
-    resultado es un puente delgado real, no todo el bloque congestionado
-    cerca de la salida.
     """
     if df_particles.empty or df_contacts.empty:
         return []
 
-    # Igual que el script de referencia: agrupamos por par de particulas,
+    # Agrupamos por par de particulas,
     # sumando f_norm de los (hasta 2) puntos de contacto de un mismo par,
     # para tener UNA arista por par tocandose (no una por punto de contacto).
     valid_c = df_contacts[(df_contacts['id_a'] >= 0) & (df_contacts['id_b'] >= 0)]
@@ -194,12 +196,7 @@ def detectar_arco_primario(df_particles, df_contacts, r_salida):
     nleft = idx[apoyado & (xs < 0.0)].tolist()
     nright = idx[apoyado & (xs > 0.0)].tolist()
 
-    # Antes: un Dijkstra (+ un has_path) por CADA par (izquierdo, derecho).
-    # Ahora: un solo Dijkstra por grano izquierdo, que da el costo y el
-    # camino a todos los derechos de una vez. El camino a cada destino es
-    # el mismo que devuelve nx.shortest_path(l, rr) (misma exploracion) y
-    # el costo es la misma suma en el mismo orden, asi que el arco elegido
-    # es identico, incluso en empates (misma iteracion y comparacion <).
+
     mejor_path = None
     min_costo_total = float('inf')
     for l in nleft:
@@ -492,15 +489,22 @@ def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, 
     p_df['sigma_yy_reducida'] = syy / g
     p_df['sigma_xy_reducida'] = sxy / g
     
+    # ROI: granos que no son del arco con el centro en la franja horizontal
+    # [y_min, y_max + ROI_EXTRA] del arco (y_min, y_max = centros mas bajo y
+    # mas alto del arco), de pared a pared. Con ROI_EXTRA = 0 (default) es la
+    # misma franja que usa force_arch_v4.py para los contactos.
     y_arco = p_df.loc[p_df.index.isin(arco_path), 'pos_y'] if arco_path else []
     roi_ymin = y_arco.min() if len(y_arco) > 0 else 0
-    roi_ymax = y_arco.max() + 10.0 if len(y_arco) > 0 else 20.0
+    roi_ymax = y_arco.max() + ROI_EXTRA if len(y_arco) > 0 else 20.0
     
     p_df['region'] = np.where(p_df.index.isin(arco_path), 'arco',
                      np.where((p_df['pos_y'] >= roi_ymin) & (p_df['pos_y'] <= roi_ymax), 'roi', 'bulk'))
     
-    r_col = 'r_nominal' if 'r_nominal' in p_df.columns else 'r_eff'
-    p_df['tipo'] = np.where(p_df[r_col] >= umbral_r, 'B', 'S')
+    if 'tipo' not in p_df.columns:
+        # Sin especie precalculada (process_one_jam_task la trae de la columna
+        # 'type' del .xy, ver analysis/especies.py): umbral de radio.
+        r_col = 'r_nominal' if 'r_nominal' in p_df.columns else 'r_eff'
+        p_df['tipo'] = np.where(p_df[r_col] >= umbral_r, 'B', 'S')
     p_df['P_A'] = p_df['P'] * p_df['area']
     p_df['P_A_reducida'] = p_df['P_reducida'] * p_df['area']
     # Mismo esquema para el esfuerzo de corte: suma de tau*area, para poder
@@ -545,6 +549,12 @@ def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, 
     del p_df
     return res, particulas
 
+def _fijar_roi_extra(valor):
+    # los procesos del Pool no siempre heredan lo que main() cambia: se pasa explicito
+    global ROI_EXTRA
+    ROI_EXTRA = float(valor)
+
+
 def worker_wrapper(args):
     return process_one_jam_task(*args)
 
@@ -554,32 +564,20 @@ def process_one_jam_task(xy_file, contact_file, jam_id, config_id, dt, r_large_m
         df_particles = pd.DataFrame.from_dict(particles, orient='index')
         df_particles.index.name = 'id'
         
-        factors = {
-            "Disco": 1.0,
-            "Triangulo": float(np.cos(np.pi / 3)),
-            "Cuadrado": float(np.cos(np.pi / 4)),
-            "Pentagono": float(np.cos(np.pi / 5)),
-            "Hexagono": float(np.cos(np.pi / 6))
-        }
-        df_particles['r_nominal'] = df_particles['r_eff'] * df_particles['shape'].map(factors).fillna(1.0)
-        
-        r_l = r_large_m
-        r_s = r_small_m
-        if pd.isna(r_l) or pd.isna(r_s):
-            unique_r = np.unique(np.round(df_particles['r_nominal'].to_numpy(), 4))
-            if len(unique_r) >= 2:
-                r_l = unique_r.max() if pd.isna(r_l) else r_l
-                r_s = unique_r.min() if pd.isna(r_s) else r_s
-            else:
-                r_l = unique_r[0] if pd.isna(r_l) else r_l
-                r_s = unique_r[0] if pd.isna(r_s) else r_s
-
-        if master_chi == 0.0 or r_s == r_l or pd.isna(r_s):
-            umbral_r = 0.0  
+        # Grande/chico por especie (columna 'type' del .xy), sin umbral de
+        # radio: el inradio/circunradio de un poligono no se compara bien con
+        # el radio de un disco. Ver analysis/especies.py.
+        especie = especie_por_tipo(df_particles['type'], df_particles['area'], master_chi)
+        df_particles['tipo'] = df_particles['type'].map(especie)
+        hay_chicas = (df_particles['tipo'] == 'S').any()
+        if not hay_chicas:
             r_s_val = np.nan
+        elif pd.notna(r_small_m):
+            r_s_val = r_small_m
         else:
-            umbral_r = (r_l + r_s) / 2.0
-            r_s_val = r_s
+            # Radio de igual area (la misma definicion que los radios de params.in)
+            r_s_val = float(np.sqrt(df_particles.loc[df_particles['tipo'] == 'S', 'area'].median() / np.pi))
+        umbral_r = 0.0   # no se usa: df_particles ya trae 'tipo'
 
         cols = ['id_a', 'id_b', 'px', 'py', 'f_norm', 'f_tan']
         dtypes_dict = {'id_a': np.int32, 'id_b': np.int32, 'px': np.float32, 'py': np.float32, 'f_norm': np.float32, 'f_tan': np.float32}
@@ -597,17 +595,15 @@ def process_one_jam_task(xy_file, contact_file, jam_id, config_id, dt, r_large_m
         if pd.notna(sides_large_m):
             forma_grande = nombre_forma(sides_large_m)
         else:
-            grandes_mask = df_particles['r_nominal'] >= umbral_r
-            grandes_shapes = df_particles.loc[grandes_mask, 'shape']
+            grandes_shapes = df_particles.loc[df_particles['tipo'] == 'B', 'shape']
             forma_grande = grandes_shapes.mode()[0] if not grandes_shapes.empty else "Ninguna"
 
-        if master_chi == 0.0 or pd.isna(r_s_val):
+        if not hay_chicas:
             forma_chica = "Ninguna"
         elif pd.notna(sides_small_m):
             forma_chica = nombre_forma(sides_small_m)
         else:
-            chicas_mask = df_particles['r_nominal'] < umbral_r
-            chicas_shapes = df_particles.loc[chicas_mask, 'shape']
+            chicas_shapes = df_particles.loc[df_particles['tipo'] == 'S', 'shape']
             forma_chica = chicas_shapes.mode()[0] if not chicas_shapes.empty else "Ninguna"
         
         if pd.notna(master_chi):
@@ -926,6 +922,9 @@ def main():
     parser.add_argument("--master", required=True)
     parser.add_argument("--workers", type=int, default=os.cpu_count() or 4)
     parser.add_argument("--dt", type=float, default=0.001)
+    parser.add_argument("--roi_extra", type=float, default=ROI_EXTRA,
+                        help="altura extra de la ROI por encima del grano mas alto del arco "
+                             "(unidades de simulacion; default 0: solo la franja del arco). Antes era 10.")
     parser.add_argument("--filas_lote", type=int, default=500_000,
                         help="filas de particulas por lote guardado (default 500000)")
     parser.add_argument("--reanudar", action="store_true",
@@ -981,7 +980,10 @@ def main():
         gc.collect()
 
     tareas = generar_tareas(pares, master_dict, args.dt)
-    with mp.Pool(processes=args.workers, maxtasksperchild=50) as pool:
+    _fijar_roi_extra(args.roi_extra)
+    print(f"ROI: franja del arco + {args.roi_extra:g} por encima del grano mas alto", flush=True)
+    with mp.Pool(processes=args.workers, maxtasksperchild=50,
+                 initializer=_fijar_roi_extra, initargs=(args.roi_extra,)) as pool:
         for xy, res in pool.imap_unordered(worker_wrapper_con_ruta, tareas, chunksize=4):
             procesados += 1
             xy_buf.append(xy)   # tambien los fallidos: no tiene sentido reintentarlos

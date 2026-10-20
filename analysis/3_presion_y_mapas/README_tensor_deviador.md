@@ -2,7 +2,7 @@
 
 Guía línea por línea del cálculo de presión `P` y esfuerzo de corte (deviador) `τ` por partícula en cada atasco. Los números de línea corresponden a `presion_tensor_arch.py` en este mismo directorio. Si el script cambia, actualizar esta tabla.
 
-El documento `presion_tensor_arch.md` explica la teoría general. Este README sigue el código.
+El documento `presion_tensor_arch.md` explica la teoría general. Este README sigue el código. La comparación con el material de clase (Born–Huang, círculo de Mohr, simetría por equilibrio de rotación) está en `README_tensor_vs_clases.md`.
 
 ---
 
@@ -184,7 +184,7 @@ Casos de prueba (geometría con normal conocida):
 | Línea | Detalle |
 |---|---|
 | 481–482 | Si `area = 0` (no debería pasar), el tensor vale 0 en vez de dividir por cero. |
-| 485 | **Simetrización:** con torques balanceados (equilibrio estático) `S01 ≈ S10`. La parte antisimétrica se descarta. Verificado con datos: el torque neto relativo es ≈ 0 en discos (sección 8). |
+| 485 | **Simetrización:** con torques balanceados (equilibrio estático) `S01 ≈ S10`. La parte antisimétrica se descarta. Verificado con datos: el torque neto relativo es ≈ 0 en discos y en polígonos (sección 8). |
 | 488 | Radio del círculo de Mohr = $(\sigma_1 - \sigma_2)/2$ = magnitud del deviador 2D. Es invariante ante rotación de ejes. **No** es lo mismo que $\sigma_{xy}$ solo, que depende de los ejes. |
 
 Relaciones útiles:
@@ -197,7 +197,7 @@ Algunos trabajos llaman deviador a $q = \sigma_1-\sigma_2 = 2\tau$; conviene acl
 
 | Líneas | Qué hace |
 |---|---|
-| 494–496 | ROI: franja con `y` entre el grano más bajo del arco y el más alto **+ 10** (en metros: ~10 diámetros de grano grande). Sin arco: `[0, 20]`. |
+| 503–509 | ROI: granos que no son del arco con el centro en la franja `y` entre el grano más bajo y el más alto del arco, de pared a pared, más `--roi_extra` por encima (default 0; antes era 10, ~10 diámetros de grano grande). Es la misma franja que usa `force_arch_v4.py` para los contactos. Sin arco: `[0, 20]` (esos atascos se descartan igual). |
 | 498–499 | `region = 'arco'` si está en el arco; si no, `'roi'` si está en la franja; si no, `'bulk'`. |
 | 501–502 | `tipo = 'B'` (grande) si `r_nominal ≥ umbral_r`; si no, `'S'` (chico). |
 
@@ -261,12 +261,32 @@ Mide, por tipo de grano (discos / polígonos / que tocan pared): el residuo del 
 | ¿`f_tan` tiene signo? | Sí: ~50 % de valores negativos. |
 | ¿Impulsos o fuerzas? | Impulsos: dividir por `dt` es correcto (sin dividir, el residuo es ≈ 1). |
 | ¿Tensor simétrico en discos? | Sí: torque neto relativo 0.0000 (mediana y percentil 90); P < 0 en 0 % de los granos. |
-| ¿Tensor simétrico en cuadrados? | Con la normal **vieja**, no: el 10 % peor de los granos llegaba a 0.42 de torque neto relativo. Origen: la normal en contactos por vértice (sección 5.1). Corregido con la normal nueva; **falta confirmar con datos** (correr el diagnóstico en una carpeta de polígonos y mirar la fila `nuevo / poligonos`). |
+| ¿Tensor simétrico en cuadrados? | **Sí, con la normal nueva.** Cuadrado–disco (`BARRIDO_WIDTHS_SQUARE_DISK/Ratio_0p1_Chi_0p2_W_2p0`, atascos 1–5, ~1500 cuadrados por atasco): torque neto relativo mediana 0.0000 y percentil 90 **0.0004**; residuo de fuerzas 0.0008; P < 0 en 0.07 % de los granos. Con la normal **vieja**: percentil 90 **0.68** y residuo **8.1** en los polígonos (0.66 de percentil 90 en los que tocan pared y 0.056 en los discos que tocan polígonos). Origen: la normal en contactos por vértice (sección 5.1). |
 
 Sobre τ > P en ~5 % de los granos (discos): no es un error. Un contacto con fricción ya genera en el tensor del grano un esfuerzo principal levemente negativo (∝ ½[fn ± √(fn² + ft²)]), así que granos con pocos contactos y mucha fricción movilizada pueden tener τ algo mayor que P.
 
+### Verificación de σxy y τ — `analysis/utils/verificar_tensor.py`
+
+Prueba independiente de la parte fuera de la diagonal y del deviador, con la misma función `calcular_tensor_y_presion_vectorizado()`:
+
+```bash
+python analysis/utils/verificar_tensor.py --sintetico                          # casos con resultado conocido
+python analysis/utils/verificar_tensor.py --sim_path <simulacion> --jam_id 1 2 # rota un atasco real
+python analysis/utils/verificar_tensor.py --parquet <out>/presion_por_particula_Disco.parquet --incluir 'Chi_0p2_W_2p0'
+```
+
+| Prueba | Qué confirma |
+|---|---|
+| Disco comprimido a lo largo de u | $\sigma = (2F/A)\,u u^T$: compresión a lo largo de y = x da σxy > 0; P = τ = F/A. |
+| Corte puro con tangenciales (disco y cuadrado) | σxy = −2T/A y τ = 2T/A: la tangencial entra con el signo correcto. |
+| Dos discos en contacto | La 3ª ley (fuerza −F_A sobre B) da el mismo tensor en los dos granos. |
+| Rotación (al azar y atasco real) | P y τ no cambian; σ rota como $R\sigma R^T$. |
+| Espejo y paredes (datos) | σxy(−x) = −σxy(x); junto a las paredes, σxy > 0 a la izquierda y < 0 a la derecha (las paredes sostienen peso por fricción, efecto Janssen), con \|σxy\|/σxx ≤ fricción de la pared. |
+
+Las pruebas sintéticas dan error relativo < 1e-6 (2026-10-07).
+
 ### Pendientes
 
-1. **Clasificación grande/chico (líneas 477, 494, 416).** Se compara el **inradio** de los polígonos (`r_eff·cos(π/n)`) con un umbral armado con `r_large`/`r_small` del índice. Si esos radios no están en la misma definición (circunradio o radio de igual área), un polígono grande puede quedar como "S" cuando los tamaños son parecidos. Ejemplo con radios de igual área: un triángulo grande equivalente a un disco de r = 0.5 tiene inradio ≈ 0.39; con un disco chico de r = 0.32 (ratio de áreas 0.4) el umbral es ≈ 0.41, así que el triángulo quedaría como chico. Alternativa sin umbral: usar la columna `tipo` del `.xy`, que es la especie exacta de cada grano.
-2. **Confirmar con datos la normal nueva en polígonos** (fila `nuevo / poligonos` del diagnóstico) y, si cierra, **recalcular** `presion_tensor_arch.py` para las mezclas con polígonos (P y τ cambian; Disco–Disco no).
+1. ~~**Clasificación grande/chico por umbral de radio.**~~ **Resuelto:** ahora `process_one_jam_task()` usa la columna `tipo` del `.xy` (la especie exacta de cada grano) con `analysis/especies.py`: la especie de mayor área mediana es `B`, la otra `S`; con χ = 0, una sola especie o áreas iguales, todo `B`. El umbral de radio (inradio vs. radios de igual área) clasificaba mal, por ejemplo, triángulos grandes en Tri–Disco con ratio 0.4. Cambia solo la separación `_B`/`_S` (P y τ por grano y los totales por región no cambian): hay que recalcular para usar las columnas por especie.
+2. **Recalcular** `presion_tensor_arch.py` para las mezclas con polígonos: la normal nueva quedó confirmada con datos (cuadrado–disco, sección 8), así que P y τ calculados con la versión anterior están mal en esas mezclas (en polígonos y también en los discos que los tocan). Disco–Disco no cambia. Opcional: repetir el diagnóstico en una mezcla con triángulos, que tienen los vértices más agudos.
 3. **`simulation/src/save_tensors.cpp`** tiene el mismo signo tangencial invertido. Hoy no se llama desde ningún lado del simulador, pero si se vuelve a usar hay que corregirlo.

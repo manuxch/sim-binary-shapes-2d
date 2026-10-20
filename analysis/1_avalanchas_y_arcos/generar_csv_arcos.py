@@ -158,8 +158,8 @@ def procesar_atasco(xy_file, params):
             lextr = np.sqrt((xc[-1] - xc[0])**2 + (yc[-1] - yc[0])**2)
             if lextr > 0: tortuosidad = longitud / lextr
             
-            #if altura > 0: aspect_ratio = 0.5 * span / altura
-            if span > 0: aspect_ratio = altura / span
+            # relacion de aspecto = (mitad del ancho) / altura; NaN si altura = 0
+            aspect_ratio = 0.5 * span / altura if altura > 0 else np.nan
 
     return {
         'Atasco_ID': jam_id, 

@@ -37,9 +37,13 @@ import multiprocessing as mp
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 
+import sys
 import numpy as np
 import pandas as pd
 import networkx as nx
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # especies.py vive en analysis/
+from especies import especie_por_tipo, area_grano  # noqa: E402
 
 import matplotlib as mpl
 mpl.use('Agg') 
@@ -344,42 +348,20 @@ def std_or_nan(values):
     values = np.asarray(values, dtype=float)
     return np.nan if values.size <= 1 else float(np.nanstd(values, ddof=1))
 
-def summarize_fn_one_jam(df_forces, arco_path, particles):
+def summarize_fn_one_jam(df_forces, arco_path, particles, chi=None):
     ids_arco = set(int(x) for x in arco_path)
     
-    # CORRECCIÓN DEFINITIVA: Encontrar el radio máximo y mínimo para crear un umbral robusto
-    radios_simulacion = [p.get("r_eff", 0.0) for p in particles.values()]
-    max_r = max(radios_simulacion) if radios_simulacion else 0.0
-    min_r = min(radios_simulacion) if radios_simulacion else 0.0
-    
-    # CORREGIDO: si la diferencia entre el radio mas grande y el mas chico es
-    # menor a UMBRAL_MIN_DIFERENCIA_RELATIVA (relativa a min_r), se trata como
-    # ruido numerico -- no como dos especies reales. Sin esto, en un atasco
-    # genuinamente mono-especie (chi=0 o chi=1), max_r y min_r difieren solo
-    # por precision de punto flotante (los poligonos recalculan r_eff cada
-    # frame a partir de vertices con ruido fisico de la simulacion; los
-    # discos leen r_eff directo de una columna, siempre el mismo valor exacto
-    # -- por eso este bug solo se ve en poligonos). El punto medio entre
-    # max_r y min_r termina partiendo esa diferencia de ruido de 6+ cifras
-    # decimales por la mitad, clasificando la poblacion casi entera como "S"
-    # o "B" segun de que lado del ruido caiga cada particula.
-    UMBRAL_MIN_DIFERENCIA_RELATIVA = 0.01  # 1%: muy por debajo de cualquier
-                                             # r_ratio_nominal real del dataset
-                                             # (~0.3-1.0), muy por encima del
-                                             # ruido numerico tipico (~1e-6).
-    if min_r > 0 and (max_r - min_r) / min_r < UMBRAL_MIN_DIFERENCIA_RELATIVA:
-        umbral_r = min_r - 1.0  # poblacion monodispersa: todo cae del lado B
-    else:
-        # El umbral dinámico se sitúa exactamente a la mitad entre la partícula más grande y la más chica.
-        umbral_r = (max_r + min_r) / 2.0
-    
-    # Asignar radios y calcular el tipo geométrico del contacto (BB, BS, SS)
-    df_forces["r_a"] = df_forces["id_a"].map(lambda x: particles[x].get("r_eff", 0.0) if x in particles else 0.0)
-    df_forces["r_b"] = df_forces["id_b"].map(lambda x: particles[x].get("r_eff", 0.0) if x in particles else 0.0)
-    
-    # Clasificamos como 'B' (Grande) si el radio es mayor o igual al umbral, sino es 'S' (Chica)
-    df_forces['tipo_a'] = np.where(df_forces['r_a'] >= umbral_r, 'B', 'S')
-    df_forces['tipo_b'] = np.where(df_forces['r_b'] >= umbral_r, 'B', 'S')
+    # Grande/chico ('B'/'S') por especie: columna 'type' del .xy, sin umbral
+    # de radio (ver analysis/especies.py). El umbral anterior, en el punto
+    # medio de los circunradios, clasificaba mal mezclas de formas: p. ej. un
+    # cuadrado chico de igual area con ratio 0.8 tiene circunradio 1.12 r_grande
+    # y quedaba como 'B'. df_forces ya viene sin contactos con paredes.
+    ids = list(particles)
+    especie = especie_por_tipo([particles[i]["type"] for i in ids],
+                               [area_grano(particles[i]) for i in ids], chi)
+    tipo_grano = {i: especie[particles[i]["type"]] for i in ids}
+    df_forces['tipo_a'] = df_forces['id_a'].map(tipo_grano).fillna('S')
+    df_forces['tipo_b'] = df_forces['id_b'].map(tipo_grano).fillna('S')
     df_forces['tipo_contacto'] = df_forces[['tipo_a', 'tipo_b']].apply(lambda x: "".join(sorted(x)), axis=1)
 
     f_norm = df_forces["f_norm"].to_numpy(dtype=float)
@@ -624,7 +606,7 @@ def process_one_jam_task(task):
         if not arco_path: return {"ok": False, "xy_file": xy_file, "error": "No se detecto arco"}
         df_forces = prepare_force_dataset(raw_contacts, particles, contact_mode=contact_mode)
         
-        summary = summarize_fn_one_jam(df_forces, arco_path, particles)
+        summary = summarize_fn_one_jam(df_forces, arco_path, particles, chi=sim_row.get("chi"))
         for col, value in sim_row.items():
             if col != "path": summary[col] = value
         summary["Atasco_ID"] = jam_id

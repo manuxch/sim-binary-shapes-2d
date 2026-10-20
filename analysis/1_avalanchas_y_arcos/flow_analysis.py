@@ -115,11 +115,17 @@ def main(idx_path=IDX_PATH, av_path=AV_PATH, solo_con_arco=False):
     ]
     group_cols = [c for c in group_cols if c in df.columns]
 
+    # S: granos grandes por avalancha (tamano_big); ST: todos los granos,
+    # grandes + chicos (total_mix), si el esqueleto trae esa columna.
+    extra = {}
+    if 'total_mix' in df.columns:
+        extra = dict(ST_mean=('total_mix', 'mean'), ST_sem=('total_mix', 'sem'))
     res = (
         df.groupby(group_cols, dropna=False)
         .agg(
             S_mean=('tamano_big', 'mean'),
             S_sem=('tamano_big', 'sem'),
+            **extra,
             n_avalancha=('tamano_big', 'count'),
             n_simulaciones=('sim_hash', 'nunique'),
             area_ratio_real_min=('area_ratio', 'min'),

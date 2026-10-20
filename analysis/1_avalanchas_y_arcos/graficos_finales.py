@@ -89,6 +89,14 @@ def prepare_arcos(df_arcos: pd.DataFrame) -> pd.DataFrame:
     )
 
     out = df_arcos.copy()
+    # Relacion de aspecto = (L/2)/H: mitad del ancho (Span, distancia horizontal
+    # entre los centros de los granos de los extremos) sobre la altura (Altura,
+    # entre los centros mas alto y mas bajo). Se recalcula aca para no depender
+    # de la definicion con que se genero el csv (antes era H/L). Arcos con
+    # H = 0 (todos los centros a la misma altura) quedan sin valor.
+    altura = out['Altura'].astype(float)
+    out['Relacion_Aspecto'] = np.where(altura > 0, 0.5 * out['Span'].astype(float) / altura.where(altura > 0, 1.0),
+                                       np.nan)
     out['sistema'] = out['system_type'].map(SYSTEM_NAME_MAP)
     out = out.dropna(subset=['sistema'])
     return out
@@ -156,7 +164,7 @@ def plot_puros_vs_orificio(df: pd.DataFrame):
         fmt='o-', color='black', label='Pure Disks', **ERRORBAR_KW
     )
     plt.xlabel(r"Orifice Ratio $(D/d)^2$")
-    plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
+    plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
     plt.legend(title="System")
     save_plot("1-pure-vs-orifice")
 
@@ -198,12 +206,53 @@ def plot_disco_vs_area_ratio(df: pd.DataFrame):
             **ERRORBAR_KW,
         )
 
-    plt.xlabel(r"Nominal Area Ratio $R_a$")
-    plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
+    plt.xlabel(r"Nominal Area Ratio $R_{\rm a}$")
+    plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
 
     plt.legend(loc='best')
 
     save_plot("2-discog-discoc-vs-area-ratio")
+
+
+def _puntos_de(curvas, n_seg=30):
+    """Puntos de las curvas (R_a, x, y, err): los datos, los extremos de las
+    barras de error y puntos intermedios sobre las lineas que los unen."""
+    puntos = []
+    for _, x, y, err in curvas:
+        x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+        e = np.nan_to_num(np.asarray(err, dtype=float), nan=0.0)
+        for xi, yi, ei in zip(x, y, e):
+            puntos += [(xi, yi), (xi, yi - ei), (xi, yi + ei)]
+        t = np.linspace(0.0, 1.0, n_seg)
+        for i in range(len(x) - 1):
+            puntos += list(zip(x[i] + t * (x[i + 1] - x[i]), y[i] + t * (y[i + 1] - y[i])))
+    return np.asarray(puntos, dtype=float)
+
+
+def _puntos_tapados(ax, puntos, titulo, margen_px=10.0):
+    """Cuantos puntos (en coordenadas de datos) quedan debajo de la leyenda
+    arriba a la derecha, con un margen en pixeles por marcadores y barras."""
+    leg = ax.legend(loc='upper right', title=titulo)
+    ax.figure.canvas.draw()
+    caja = leg.get_window_extent()
+    disp = ax.transData.transform(puntos)
+    return int(np.sum((disp[:, 0] >= caja.x0 - margen_px) & (disp[:, 0] <= caja.x1 + margen_px) &
+                      (disp[:, 1] >= caja.y0 - margen_px) & (disp[:, 1] <= caja.y1 + margen_px)))
+
+
+def margen_para_leyenda(ax, curvas, titulo, paso=0.05, max_extra=1.5):
+    """Fraccion del rango de y que hay que agregar arriba para que la leyenda
+    entre arriba a la derecha sin tapar curvas (0 si ya entra). No cambia los ejes."""
+    puntos = _puntos_de(curvas)
+    y0, y1 = ax.get_ylim()
+    extra = 0.0
+    while extra <= max_extra:
+        ax.set_ylim(y0, y1 + extra * (y1 - y0))
+        if _puntos_tapados(ax, puntos, titulo) == 0:
+            break
+        extra += paso
+    ax.set_ylim(y0, y1)
+    return min(extra, max_extra)
 
 
 def plot_sweeps_by_system(
@@ -259,7 +308,9 @@ def plot_sweeps_by_system(
         if p0 is None:
             continue
 
-        targets = [0.1, 0.2, 0.4, 0.5]
+        # R_a = 0.5 no se incluye: solo existe para Disco-Disco y no se puede
+        # comparar entre sistemas.
+        targets = [0.1, 0.2, 0.4]
         curvas = []
 
         for target in targets:
@@ -287,7 +338,7 @@ def plot_sweeps_by_system(
             err = [e0] + grp['log_S_err'].tolist()
             curvas.append((chosen, x, y, err))
 
-            print(f"\nSistema: {system_name}\n  label AR {target} -> {AR_COL} real {chosen:.4f}")
+            print(f"\nSistema: {system_name}\n  R_a {target} -> {AR_COL} real {chosen:.4f}")
 
             x_all.extend(x)
             y_arr = np.asarray(y, dtype=float)
@@ -319,32 +370,50 @@ def plot_sweeps_by_system(
     # =========================================================================
     # SEGUNDA PASADA: una figura por sistema, todas con el mismo x_range/y_range.
     # =========================================================================
+    figuras = []
     for system_name, _ in target_systems:
         if system_name not in datos_por_sistema:
             continue
         system_id = system_name.lower().replace('(', '').replace(')', '').replace('_', '-').replace(' ', '-')
 
-        plt.figure()
+        fig = plt.figure()
+        ax = plt.gca()
         curvas = datos_por_sistema[system_name]
         colors, markers = SEQ_STYLE(len(curvas))
         for (chosen, x, y, err), color, marker in zip(curvas, colors, markers):
             plt.errorbar(x, y, yerr=err, fmt=f'{marker}-', color=color,
-                         label=rf"$R_a = {chosen:.3g}$", **ERRORBAR_KW)
+                         label=rf"$R_{{\rm a}} = {chosen:.3g}$", **ERRORBAR_KW)
 
         plt.xlabel(r"Concentration $\chi$")
-        plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
-        plt.legend(loc='upper left')
+        plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
         plt.xlim(*x_range)
         plt.ylim(*y_range)
+        titulo = CFG.english_labels.get(system_name, system_name)
+        nombre = (f"4-{system_id}-clogging-curves-zoom-chi-0p05-0p15" if zoom
+                  else f"4-{system_id}-clogging-curves")
+        figuras.append((fig, ax, curvas, titulo, nombre))
 
-        if zoom:
-            save_plot(f"4-{system_id}-clogging-curves-zoom-chi-0p05-0p15")
-        else:
-            save_plot(f"4-{system_id}-clogging-curves")
+    # Cartel con el sistema (ej. "Triangle-Disk") como titulo de la leyenda,
+    # adentro, arriba a la derecha. Si en alguna figura tapa curvas, se agrega
+    # el mismo margen arriba en TODAS (siguen con el mismo eje y).
+    extra = max(margen_para_leyenda(ax, curvas, titulo) for _, ax, curvas, titulo, _ in figuras)
+    for fig, ax, curvas, titulo, nombre in figuras:
+        ax.set_ylim(y_range[0], y_range[1] + extra * (y_range[1] - y_range[0]))
+        ax.legend(loc='upper right', title=titulo)
+        plt.figure(fig.number)
+        save_plot(nombre)
 
 
-def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15):
-    print(f"  -> Plotting 5a/b: Normalized Effects (AR ~ {target_ar})...")
+def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15, total: bool = False):
+    """5a/5b: tamano medio de avalancha normalizado por el del sistema puro.
+    total=False: <s> = granos grandes por avalancha (S_mean).
+    total=True:  <s_T> = todos los granos, grandes + chicos (ST_mean); solo 5b,
+                 archivo 5b-matrix-normalized-total."""
+    mean_col, sem_col = ('ST_mean', 'ST_sem') if total else ('S_mean', 'S_sem')
+    if mean_col not in df.columns:
+        print(f"  [!] {mean_col} no esta en estadisticas_flujo_agregadas.csv: correr flow_analysis.py de nuevo.")
+        return
+    print(f"  -> Plotting 5{'b total' if total else 'a/b'}: Normalized Effects (R_a ~ {target_ar})...")
 
     df_mix = df[df['chi'] > 0].copy()
     if df_mix.empty:
@@ -352,16 +421,18 @@ def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15):
 
     main_dd = df_mix['D_d_sq'].value_counts().idxmax()
     df_puros = (
-        df[df['chi'] == 0][['grano_base', 'D_d_sq', 'S_mean', 'S_sem']]
-        .rename(columns={'S_mean': 'S0', 'S_sem': 'S0_err'})
+        df[df['chi'] == 0][['grano_base', 'D_d_sq', mean_col, sem_col]]
+        .rename(columns={mean_col: 'S0', sem_col: 'S0_err'})
     )
 
     df_norm = pd.merge(df_mix[df_mix['D_d_sq'] == main_dd], df_puros, on=['grano_base', 'D_d_sq'])
     if df_norm.empty:
         return
 
-    df_norm['log_S_norm'] = np.log((df_norm['S_mean'] / df_norm['S0']) + 1)
-    df_norm['log_S_norm_err'] = df_norm['S_sem'] / (df_norm['S_mean'] + df_norm['S0'])
+    df_norm['log_S_norm'] = np.log((df_norm[mean_col] / df_norm['S0']) + 1)
+    df_norm['log_S_norm_err'] = df_norm[sem_col] / (df_norm[mean_col] + df_norm['S0'])
+    ylabel = (r"$\ln(\langle s_{\rm T} \rangle / \langle s_{\rm T,0} \rangle + 1)$" if total
+              else r"$\ln(\langle s \rangle / \langle s_0 \rangle + 1)$")
 
     def draw(sistemas: List[str], filename: str):
         plt.figure()
@@ -388,17 +459,22 @@ def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15):
             )
 
         plt.xlabel(r"Concentration $\chi$")
-        plt.ylabel(r"$\ln(\langle S \rangle / \langle S_0 \rangle + 1)$")
-        plt.ylim(0.4, 2.5)
+        plt.ylabel(ylabel)
+        if not total:
+            plt.ylim(0.4, 2.5)
         plt.legend(loc='upper left')
         save_plot(filename)
 
+    matriz = ['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)']
+    if total:
+        draw(matriz, "5b-matrix-normalized-total")
+        return
     draw(['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)', 'Disco(G)-Tri(C)'], "5a-additive-normalized")
-    draw(['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)'], "5b-matrix-normalized")
+    draw(matriz, "5b-matrix-normalized")
 
 
 def plot_geometric_effects_raw(df: pd.DataFrame, target_ar: float = 0.15):
-    print(f"  -> Plotting 5c: Raw Log-Size Matrix Effect (AR ~ {target_ar})...")
+    print(f"  -> Plotting 5c: Raw Log-Size Matrix Effect (R_a ~ {target_ar})...")
     main_dd = df['D_d_sq'].value_counts().idxmax()
 
     plt.figure()
@@ -428,14 +504,14 @@ def plot_geometric_effects_raw(df: pd.DataFrame, target_ar: float = 0.15):
         )
 
     plt.xlabel(r"Concentration $\chi$")
-    plt.ylabel(r"$\ln(\langle S \rangle + 1)$")
+    plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
     plt.ylim(2.2, 6.5)
     plt.legend()
     save_plot("5c-matrix-raw-log")
 
 
 def plot_geometric_effects_linear(df: pd.DataFrame, target_ar: float = 0.15):
-    print(f"  -> Plotting 11: Linear Scale (AR ~ {target_ar})...")
+    print(f"  -> Plotting 11: Linear Scale (R_a ~ {target_ar})...")
     main_dd = df['D_d_sq'].value_counts().idxmax()
 
     def draw_lin(sistemas: List[str], filename: str):
@@ -466,7 +542,7 @@ def plot_geometric_effects_linear(df: pd.DataFrame, target_ar: float = 0.15):
             )
 
         plt.xlabel(r"Concentration $\chi$")
-        plt.ylabel(r"Mean Size $\langle S \rangle$")
+        plt.ylabel(r"Mean Size $\langle s \rangle$")
         plt.legend(loc='upper left')
         save_plot(filename)
 
@@ -488,7 +564,7 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
     matrix_systems = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)']
     df_filtered = df_arcos[df_arcos['sistema'].isin(matrix_systems)].copy()
 
-    # Filtro general: disco-disco usa AR nominal ~0.1; el resto target_ar ~0.15.
+    # Filtro general: disco-disco usa R_a nominal ~0.1; el resto target_ar ~0.15.
     df_mix = filter_standard_size(df_filtered[df_filtered['chi'] > 0], 0.15, 0.1, system_col='sistema')
     if df_mix.empty:
         print("  [!] No hay datos de arcos para el filtro estándar de tamaño.")
@@ -569,7 +645,7 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
             anotar_chi(ax_box, target_chi)
             plt.xlabel(None)
             plt.yscale('log')
-            plt.ylabel(r"Avalanche Size $S$")
+            plt.ylabel(r"Avalanche Size $s$")
             save_plot(f"10-avalanche-boxplot-chi-{target_chi}")
 
 
@@ -617,7 +693,7 @@ def plot_arch_geometry_deep_dive(df_stats: pd.DataFrame):
     ax.set_xticks(range(len(present)))
     ax.set_xticklabels(new_ticks, rotation=15)
     plt.xlabel(None)
-    plt.ylabel("Arch Aspect Ratio ($H/L$)")
+    plt.ylabel("Arch Aspect Ratio $L/2H$")
     anotar_chi(ax, target_chi)
     save_plot(f"13-arch-aspect-ratio-chi-{target_chi}")
 
@@ -633,6 +709,24 @@ def plot_arch_geometry_deep_dive(df_stats: pd.DataFrame):
     plt.ylabel("Arch Height ($H$)")
     anotar_chi(ax, target_chi)
     save_plot(f"14-arch-height-boxplot-chi-{target_chi}")
+
+
+def aspecto_medio(g, n_boot=500, seed=0):
+    """Relacion de aspecto del arco medio, <L>/(2<H>), y su error estandar por
+    bootstrap sobre los arcos (remuestreo con reposicion). Usa Span (L) y
+    Altura (H) de cada arco."""
+    L = g['Span'].to_numpy(float)
+    H = g['Altura'].to_numpy(float)
+    ok = np.isfinite(L) & np.isfinite(H)
+    L, H = L[ok], H[ok]
+    n = len(L)
+    if n == 0 or H.mean() <= 0:
+        return {'mean': np.nan, 'sem': np.nan, 'count': n}
+    valor = L.mean() / (2.0 * H.mean())
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, n, size=(n_boot, n))
+    boot = L[idx].mean(axis=1) / (2.0 * H[idx].mean(axis=1))
+    return {'mean': valor, 'sem': float(np.std(boot, ddof=1)), 'count': n}
 
 
 def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
@@ -655,7 +749,7 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
     df_filtered = df_filtered[(df_filtered['chi'] >= 0) & (df_filtered['chi'] <= 0.4)]
 
     metrics = {
-        'Relacion_Aspecto': 'Arch Aspect Ratio ($H/L$)',
+        'Relacion_Aspecto': r'Arch Aspect Ratio $\langle L\rangle / 2\langle H\rangle$',
         'Tortuosidad': 'Arch Tortuosity',
     }
 
@@ -666,12 +760,19 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
             if group.empty:
                 continue
 
-            summary = group.groupby('chi')[metric].agg(['mean', 'std', 'count']).reset_index()
+            if metric == 'Relacion_Aspecto':
+                # Cociente de promedios <L>/(2<H>), no promedio de L/2H: un arco
+                # casi plano (H ~ 0) da L/2H enorme y dominaba media y error.
+                summary = (group.groupby('chi')
+                           .apply(lambda g: pd.Series(aspecto_medio(g)), include_groups=False)
+                           .reset_index())
+            else:
+                summary = group.groupby('chi')[metric].agg(['mean', 'std', 'count']).reset_index()
+                summary['sem'] = summary['std'] / np.sqrt(summary['count'])
             summary = summary[summary['count'] >= 20]
             if summary.empty:
                 continue
 
-            summary['sem'] = summary['std'] / np.sqrt(summary['count'])
             color, marker = CFG.system_style.get(sys_name, ('black', 'o'))
             plt.errorbar(
                 summary['chi'], summary['mean'], yerr=summary['sem'],
@@ -704,11 +805,12 @@ def main():
     # Limpieza: sistema fuera del estudio actual.
     df = df[df['sistema'] != 'Cuad(G)-Cuad(C)']
 
+    # Orden de los sistemas: Triangle, Square, Pentagon y Disk-Disk al final.
     sistemas_meta = [
-        ('Disco(G)-Disco(C)', 'Disk'),
+        ('Tri(G)-Disco(C)', 'Triangle'),
         ('Cuad(G)-Disco(C)', 'Square'),
         ('Pent(G)-Disco(C)', 'Pentagon'),
-        ('Tri(G)-Disco(C)', 'Triangle')
+        ('Disco(G)-Disco(C)', 'Disk'),
     ]
 
     # Flujo / avalanchas
@@ -717,6 +819,7 @@ def main():
     plot_sweeps_by_system(df, sistemas_meta)
     plot_sweeps_by_system(df, sistemas_meta, zoom=True, xlim=(0.05, 0.15))
     plot_geometric_effects(df)
+    plot_geometric_effects(df, total=True)
     plot_geometric_effects_raw(df)
     plot_geometric_effects_linear(df)
 
