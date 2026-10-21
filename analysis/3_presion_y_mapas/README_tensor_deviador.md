@@ -26,6 +26,138 @@ El signo menos hace que la compresión sea positiva. `τ` es el radio del círcu
 
 ---
 
+## 1b. Cálculo completo, paso a paso
+
+Resumen de lo que hacen `presion_tensor_arch.py` (por grano y por atasco) y `comparar_presion_por_chi.py` (promedio por configuración y barras de error). Los detalles de cada función están en las secciones 5 y 6.
+
+### Fuerza de cada contacto
+
+Box2D da, para cada contacto entre los cuerpos $A$ y $B$, el punto de contacto $\vec p$ y los impulsos normal $f_n$ y tangencial $f_t$.
+
+- **Normal** $\hat n$, de $A$ hacia $B$:
+  - discos: dirección radial;
+  - polígonos: normal a la cara de contacto;
+  - paredes: normal al segmento.
+  Si los dos lados dan una normal, se usa la del cuerpo en el que el punto de contacto está más adentro, como hace Box2D.
+- **Tangente:** $\hat t = (-n_y,\; n_x)$.
+- **Fuerza sobre $A$:** el impulso se pasa a fuerza dividiendo por el paso de tiempo $\Delta t$:
+
+$$
+\vec F_A = \frac{-f_n\,\hat n + f_t\,\hat t}{\Delta t},
+\qquad
+\vec F_B = -\vec F_A \quad \text{(tercera ley de Newton)}
+$$
+
+Los contactos contra pared se conservan: aportan al tensor del grano, pero la pared no tiene tensor.
+
+### Momento de las fuerzas de cada grano
+
+Para cada grano $i$, sumando sobre sus contactos $c$, con $\vec r^{\,c} = \vec p^{\,c} - \vec x_i$ (del centro del grano al punto de contacto):
+
+$$
+S_{\alpha\beta} = \sum_{c} r^{c}_{\alpha}\, F^{c}_{\beta}
+\qquad (\alpha,\beta = x,y)
+$$
+
+### Tensor de esfuerzos
+
+Se divide por el área $A_i$ del grano y se cambia el signo para que la compresión sea positiva. La parte cruzada se simetriza:
+
+$$
+\sigma_{xx} = -\frac{S_{xx}}{A_i},
+\qquad
+\sigma_{yy} = -\frac{S_{yy}}{A_i},
+\qquad
+\sigma_{xy} = -\frac{S_{xy} + S_{yx}}{2A_i}
+$$
+
+Con equilibrio de torques, $S_{xy} = S_{yx}$ y la simetrización no cambia nada; con la normal corregida la diferencia es despreciable (sección 8).
+
+### Presión y deviador
+
+**Presión**, el centro del círculo de Mohr:
+
+$$
+P_i = \frac{\sigma_{xx} + \sigma_{yy}}{2}
+$$
+
+**Deviador**, el tensor menos su parte isótropa:
+
+$$
+s = \sigma - P_i\,\mathbb{1} =
+\begin{pmatrix}
+\dfrac{\sigma_{xx}-\sigma_{yy}}{2} & \sigma_{xy} \\[2mm]
+\sigma_{xy} & -\dfrac{\sigma_{xx}-\sigma_{yy}}{2}
+\end{pmatrix}
+$$
+
+**Magnitud del deviador**, el radio del círculo de Mohr o esfuerzo de corte máximo:
+
+$$
+\tau_i = \sqrt{\left(\frac{\sigma_{xx}-\sigma_{yy}}{2}\right)^{2} + \sigma_{xy}^{2}}
+= \frac{\sigma_1 - \sigma_2}{2},
+\qquad
+\sigma_{1,2} = P_i \pm \tau_i
+$$
+
+En unidades reducidas, divididas por la gravedad:
+
+$$
+\tilde P_i = \frac{P_i}{g},
+\qquad
+\tilde\tau_i = \frac{\tau_i}{g},
+\qquad
+g = 9.8
+$$
+
+### Regiones y especies
+
+- **Arco:** los granos del arco que bloquea el orificio.
+- **ROI:** los granos que no son del arco y tienen el centro en la franja $y^{\rm arco}_{\min} \le y \le y^{\rm arco}_{\max}$, de pared a pared.
+- **Bulk:** el resto.
+
+Cada grano es además grande (B) o chico (S), según la columna `tipo` del `.xy`.
+
+### Promedio por región
+
+Para cada atasco $j$ y región $\mathcal R$ (y especie, si corresponde) se guardan en `resumen_presion_por_atasco.csv` las sumas pesadas por área. Son las columnas `SumP_reducida_<region>`, `SumTau_reducida_<region>` y `Area_<region>`:
+
+$$
+\Sigma^{P}_{j} = \sum_{i\in\mathcal R} \tilde P_i A_i,
+\qquad
+\Sigma^{\tau}_{j} = \sum_{i\in\mathcal R} \tilde\tau_i A_i,
+\qquad
+\mathcal A_j = \sum_{i\in\mathcal R} A_i
+$$
+
+Para cada configuración (forma, $\chi$), el valor medio es el cociente de las sumas sobre todos los atascos, es decir, un promedio pesado por área:
+
+$$
+\langle P\rangle = \frac{\sum_j \Sigma^{P}_{j}}{\sum_j \mathcal A_j},
+\qquad
+\langle \tau\rangle = \frac{\sum_j \Sigma^{\tau}_{j}}{\sum_j \mathcal A_j}
+$$
+
+### Barras de error
+
+Cada atasco es una muestra, porque los granos de un mismo atasco no son independientes. Con la media de cada atasco $\langle P\rangle_j = \Sigma^{P}_{j}/\mathcal A_j$ y pesos $w_j = \mathcal A_j$:
+
+$$
+\text{SEM} = \frac{\text{std}_w\!\left(\langle P\rangle_j\right)}{\sqrt{n_{\rm eff}}},
+\qquad
+n_{\rm eff} = \frac{\left(\sum_j w_j\right)^2}{\sum_j w_j^2}
+$$
+
+Para $\langle\tau\rangle$ es lo mismo.
+
+### Observaciones
+
+- $\langle\tau\rangle$ es el promedio de la magnitud del deviador de cada grano, no la magnitud del deviador del tensor promedio. Esta última es siempre menor o igual, porque los ejes principales de cada grano apuntan en direcciones distintas. `estres_arco_vs_roi.py` imprime las dos (`tau` y `tau_m`).
+- $P$ no depende de los ejes, porque es la traza. $\sigma_{xy}$ entra solo en $\tau$, $\sigma_1$ y $\sigma_2$.
+- El promedio de $\sigma_{xy}$ sobre una región simétrica da aproximadamente cero (izquierda y derecha del orificio se cancelan), por eso se grafica $\tau$ y no $\sigma_{xy}$.
+
+---
+
 ## 2. Flujo general
 
 ```
