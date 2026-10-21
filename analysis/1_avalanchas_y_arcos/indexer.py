@@ -211,8 +211,15 @@ def parse_params(filepath, folder_path):
         return params
 
     except Exception as e:
-        print(f"Error leyendo {filepath}: {e}")
+        ERRORES_LECTURA.append((filepath, str(e)))
+        if len(ERRORES_LECTURA) <= 5:
+            print(f"Error leyendo {filepath}: {e}")
         return None
+
+
+# params.in que no se pudieron leer (ej. [Errno 5] con archivos de OneDrive
+# que no estan descargados en la PC); main() no guarda el indice si hay alguno
+ERRORES_LECTURA = []
 
 
 def indexar(base_dir):
@@ -269,21 +276,36 @@ def main(base_dir=None):
     """Indexa base_dir, o si no se da, todas las carpetas de SIM_DATA_DIR
     (pueden ser varias separadas por ':', ver rutas.py) en un solo indice."""
     dirs = [base_dir] if base_dir else rutas.SIM_DATA_DIRS
-    partes = []
+    partes, problemas = [], []
     for d in dirs:
         print(f"--- Indexando en: {d} ---")
         if not os.path.isdir(d):
             print(f"  [!] No existe (o el contenedor no la ve): {d}")
+            problemas.append(f"no existe: {d}")
             continue
+        n_err0 = len(ERRORES_LECTURA)
         df_d = indexar(d)
+        n_err = len(ERRORES_LECTURA) - n_err0
+        if n_err:
+            print(f"  [!] {n_err} params.in no se pudieron leer en {d}")
+            problemas.append(f"{n_err} params.in ilegibles en {d}")
         if df_d is None:
-            print("  [!] Sin simulaciones (ninguna carpeta con params.in).")
+            print("  [!] Sin simulaciones (ninguna carpeta con params.in legible).")
             continue
         print(f"  {len(df_d)} simulaciones")
         partes.append(df_d)
+    if problemas:
+        print("\n[-] No se guarda el indice: faltarian simulaciones.")
+        for p in problemas:
+            print(f"    - {p}")
+        if any('Errno 5' in e for _, e in ERRORES_LECTURA):
+            print("    [Errno 5] en /mnt/c/.../OneDrive: los archivos estan solo en la nube. En el Explorador de")
+            print("    Windows: clic derecho en la carpeta -> 'Mantener siempre en este dispositivo', esperar a")
+            print("    que termine de descargar y volver a correr.")
+        return False
     if not partes:
         print("No hay datos.")
-        return
+        return False
 
     df = pd.concat(partes, ignore_index=True).drop_duplicates(subset='sim_hash')
     os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
@@ -292,7 +314,9 @@ def main(base_dir=None):
     if 'system_type' in df.columns:
         print("    por sistema: " + ", ".join(f"{k}: {v}" for k, v in df['system_type'].value_counts().items()))
     print(f"[+] Guardado en: {OUTPUT_CSV}")
+    return True
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    sys.exit(0 if main() else 1)

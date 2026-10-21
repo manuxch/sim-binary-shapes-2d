@@ -221,6 +221,7 @@ def main():
     if args.area_ratio is not None:
         sufijo += f"_Ar{args.area_ratio:g}".replace('.', 'p')
     base = os.path.join(rutas.GRAFICOS_FINALES_DIR, f"masa_avalancha{sufijo}")
+    os.makedirs(rutas.GRAFICOS_FINALES_DIR, exist_ok=True)
     res.to_csv(base + '.csv', index=False)
     print(f"Tabla: {base}.csv")
     with pd.option_context('display.width', 200, 'display.max_columns', 20):

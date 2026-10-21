@@ -22,11 +22,10 @@ def main():
     print("=" * 60)
 
     # 1. INDEXACIÓN
-    indexer.main()
     idx_path = rutas.MASTER_INDEX
-    if not os.path.exists(idx_path):
+    if not indexer.main() or not os.path.exists(idx_path):
         print("[-] Error: No se pudo generar el índice. Abortando.")
-        return
+        return False
 
     # 2. PROCESAMIENTO DE AVALANCHAS
     processor.main()
@@ -58,8 +57,10 @@ def main():
     # temporal_chi.main()
 
     print("\n[+] PIPELINE COMPLETADO EXITOSAMENTE.")
+    return True
 
 
 if __name__ == "__main__":
+    import sys
     multiprocessing.freeze_support()
-    main()
+    sys.exit(0 if main() else 1)
