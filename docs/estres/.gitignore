@@ -1,0 +1,7 @@
+estres.pdf
+*.aux
+*.fls
+*.fdb_latexmk
+*.out
+*.toc
+*.xdv
