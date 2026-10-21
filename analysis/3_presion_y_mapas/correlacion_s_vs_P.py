@@ -53,8 +53,10 @@ from estilo_figuras import (aplicar_estilo, estilo_sistema, guardar_figura,  # n
 from comparar_presion_por_chi import filtrar_lotes_confirmados, _estadistica_pesada  # noqa: E402
 
 COLUMNA_PRESION = {'P': 'SumP_reducida', 'tau': 'SumTau_reducida'}
-ETIQUETA_X = {'P': r'Reduced Mean Pressure $\langle P\rangle / g$',
-              'tau': r'Reduced Mean Shear Stress $\langle \tau\rangle / g$'}
+# Presion reducida con la escala Mg/d (fuerza por unidad de longitud en 2D);
+# en las simulaciones M = d = 1, asi que el valor numerico es P/g.
+ETIQUETA_X = {'P': r'Reduced Mean Pressure $\langle P\rangle d / Mg$',
+              'tau': r'Reduced Mean Shear Stress $\langle \tau\rangle d / Mg$'}
 ETIQUETA_Y = {'big': r'Mean Avalanche Size $\langle s \rangle$',
               'total': r'Mean Avalanche Size $\langle s \rangle$ (all grains)'}
 COLUMNA_S = {'big': 'tamano_big', 'total': 'total_mix'}
