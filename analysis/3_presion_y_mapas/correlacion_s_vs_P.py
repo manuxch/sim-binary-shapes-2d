@@ -11,6 +11,10 @@ default 2.0) para que <s> sea comparable. --logy / --logx / --loglog: eje
 y, eje x o los dos en escala logaritmica (el pdf lleva el sufijo -logy,
 -logx o -loglog, asi no pisa la version lineal).
 --paneles: un panel por sistema con el color segun chi.
+--s_en_x: <s> en el eje x (variable independiente) y la presion en el eje y.
+Los --logx / --logy siguen refiriendose a la presion y a <s> respectivamente
+(--logy = <s> logaritmico, ahora en el eje x); el pdf se llama
+16-P-vs-s-... con sufijo -logs, -logP o -loglog.
 
 Entradas:
   resumen_presion_por_atasco.csv     (presion_tensor_arch.py)
@@ -151,10 +155,21 @@ def pearson(x, y, logy):
     return np.corrcoef(x, y)[0, 1] if len(x) > 2 else np.nan
 
 
-def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_max, area_ratio):
+def ejes_xy(magnitud, region, tipo_s, s_en_x):
+    """(columna, error, etiqueta) del eje x y del eje y."""
+    pres = ('P', 'P_sem', f"{ETIQUETA_X[magnitud]} ({NOMBRE_REGION[region]})")
+    aval = ('s', 's_sem', ETIQUETA_Y[tipo_s])
+    return (aval, pres) if s_en_x else (pres, aval)
+
+
+def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_max, area_ratio,
+                     s_en_x=False):
     from matplotlib.colors import Normalize
     from matplotlib.cm import ScalarMappable
     aplicar_estilo()
+    (xc, xe, xl), (yc, ye, yl) = ejes_xy(magnitud, region, tipo_s, s_en_x)
+    if s_en_x:
+        logx, logy = logy, logx
     sistemas = sorted(df['sistema'].unique(), key=lambda s: (s != 'Disco(G)-Disco(C)', s))
     ncol = 2 if len(sistemas) > 1 else 1
     nfil = int(np.ceil(len(sistemas) / ncol))
@@ -172,22 +187,22 @@ def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_m
             g = g.sort_values('chi')
             m = marcador.get(fam, 'o')
             if error:
-                ax.errorbar(g['P'], g['s'], xerr=g['P_sem'], yerr=g['s_sem'], fmt='none', ecolor='0.55',
+                ax.errorbar(g[xc], g[yc], xerr=g[xe], yerr=g[ye], fmt='none', ecolor='0.55',
                             elinewidth=0.8, capsize=2, zorder=2)
             lbl = None
             if len(familias) > 1 and fam not in vistos:
                 lbl = f"$R_{{out}}$ = {fam[0]:g}, W = {fam[1]:g}"
                 vistos.add(fam)
-            ax.scatter(g['P'], g['s'], c=g['chi'], cmap=cmap, norm=norm, marker=m, s=55,
+            ax.scatter(g[xc], g[yc], c=g['chi'], cmap=cmap, norm=norm, marker=m, s=55,
                        edgecolors='black', linewidths=0.6, zorder=3, label=lbl)
         ax.set_title(rf"{estilo_sistema(sis)[2]}  ($R_{{\rm a}} = {area_ratio:g}$)", fontsize='medium')
         ejes_log(ax, logx, logy)
     for ax in axes.flat[len(sistemas):]:
         ax.set_visible(False)
     for ax in axes[-1, :]:
-        ax.set_xlabel(f"{ETIQUETA_X[magnitud]} ({NOMBRE_REGION[region]})")
+        ax.set_xlabel(xl)
     for ax in axes[:, 0]:
-        ax.set_ylabel(ETIQUETA_Y[tipo_s])
+        ax.set_ylabel(yl)
     if len(familias) > 1:
         fig.legend(loc='lower center', ncol=min(len(familias), 4), frameon=False, fontsize='small',
                    bbox_to_anchor=(0.45, -0.02))
@@ -197,20 +212,23 @@ def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_m
     return guardar_figura(out, fig)
 
 
-def graficar(df, out, magnitud, region, tipo_s, logx, logy, error, area_ratio):
+def graficar(df, out, magnitud, region, tipo_s, logx, logy, error, area_ratio, s_en_x=False):
     aplicar_estilo()
+    (xc, xe, xl), (yc, ye, yl) = ejes_xy(magnitud, region, tipo_s, s_en_x)
+    if s_en_x:
+        logx, logy = logy, logx
     fig, ax = plt.subplots(figsize=(7.5, 5.5))
     sistemas = sorted(df['sistema'].unique(), key=lambda s: (s != 'Disco(G)-Disco(C)', s))
     for sis in sistemas:
         sub = df[df['sistema'] == sis].sort_values('chi')
         color, marker, etiqueta = estilo_sistema(sis)
         lbl = etiqueta
-        xerr = sub['P_sem'] if error else None
-        yerr = sub['s_sem'] if error else None
-        ax.errorbar(sub['P'], sub['s'], xerr=xerr, yerr=yerr, color=color, marker=marker, ls='none',
+        xerr = sub[xe] if error else None
+        yerr = sub[ye] if error else None
+        ax.errorbar(sub[xc], sub[yc], xerr=xerr, yerr=yerr, color=color, marker=marker, ls='none',
                     ms=7, label=lbl, **ERRORBAR_KW)
-    ax.set_xlabel(f"{ETIQUETA_X[magnitud]} ({NOMBRE_REGION[region]})")
-    ax.set_ylabel(ETIQUETA_Y[tipo_s])
+    ax.set_xlabel(xl)
+    ax.set_ylabel(yl)
     ejes_log(ax, logx, logy)
     ax.legend(title=rf"$R_{{\rm a}} = {area_ratio:g}$", frameon=False,
               loc='best', fontsize='small')
@@ -243,6 +261,9 @@ def main():
     ap.add_argument('--paneles', action='store_true',
                     help='un panel por sistema con el color segun chi (por defecto: un solo panel, '
                          'color y marcador por sistema)')
+    ap.add_argument('--s_en_x', action='store_true',
+                    help='<s> en el eje x (variable independiente) y la presion en el eje y; '
+                         '--logy sigue siendo <s> logaritmico')
     ap.add_argument('--sin_error', action='store_true', help='sin barras de error')
     ap.add_argument('--out', default=None,
                     help='pdf de salida (default: 5_graficos_finales/16-s-vs-<P|tau>-<region>-ratio-<r>-W-<W>.pdf)')
@@ -274,10 +295,16 @@ def main():
         sys.exit("[!] No quedo ninguna simulacion despues de filtrar (--W, --area_ratio, --radio_salida, --chi_max).")
     df['sistema'] = df['system_type'].map(lambda s: SYSTEM_NAME_MAP.get(str(s), str(s)))
 
+    if args.s_en_x:
+        nombre = f"16-{args.magnitud}-vs-s"
+        sufijo = ('-loglog' if args.logx and args.logy else f'-log{args.magnitud}' if args.logx
+                  else '-logs' if args.logy else '')
+    else:
+        nombre = f"16-s-vs-{args.magnitud}"
+        sufijo = '-loglog' if args.logx and args.logy else '-logx' if args.logx else '-logy' if args.logy else ''
     out = args.out or os.path.join(
         rutas.GRAFICOS_FINALES_DIR,
-        f"16-s-vs-{args.magnitud}-{args.region}-ratio-{args.area_ratio:g}-W-{args.W:g}"
-        f"{'-loglog' if args.logx and args.logy else '-logx' if args.logx else '-logy' if args.logy else ''}.pdf")
+        f"{nombre}-{args.region}-ratio-{args.area_ratio:g}-W-{args.W:g}{sufijo}.pdf")
     datos = os.path.splitext(out)[0] + '_datos.csv'
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     cols = ['sistema', 'chi', 'area_ratio_nominal', 'Radio_salida', 'W', 'clave', 'P', 'P_sem', 'n_atascos',
@@ -291,10 +318,10 @@ def main():
         print(f"  {sis:20s} r = {pearson(g['P'], g['s'], args.logy):+.2f}")
     if args.paneles:
         path = graficar_paneles(df, out, args.magnitud, args.region, args.s, args.logx, args.logy,
-                                not args.sin_error, args.chi_max, args.area_ratio)
+                                not args.sin_error, args.chi_max, args.area_ratio, args.s_en_x)
     else:
         path = graficar(df, out, args.magnitud, args.region, args.s, args.logx, args.logy,
-                        not args.sin_error, args.area_ratio)
+                        not args.sin_error, args.area_ratio, args.s_en_x)
     print(f"Figura: {path}\nDatos:  {datos}")
 
 
