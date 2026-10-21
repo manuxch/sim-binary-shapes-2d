@@ -43,7 +43,8 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "3_presion_y_mapas"))
 from presion_tensor_arch import (parse_xy, parse_paredes, fuerzas_contacto,  # noqa: E402
-                                 normales_contacto, detectar_arco_primario)
+                                 normales_contacto, detectar_arco_primario,
+                                 leer_normales_box2d)
 
 COLS_CONTACTOS = ['id_a', 'id_b', 'px', 'py', 'f_norm', 'f_tan']
 DTYPES_CONTACTOS = {'id_a': np.int32, 'id_b': np.int32, 'px': np.float32,
@@ -66,18 +67,26 @@ def leer_tabla(path):
     return df, dt
 
 
-def tensor_script(xy_file, contact_file, dt):
+def tensor_script(xy_file, contact_file, dt, normales='auto'):
     """Tensor por grano tal como lo arma calcular_tensor_y_presion_vectorizado
-    (mismas funciones y mismos tipos de datos al leer)."""
+    (mismas funciones y mismos tipos de datos al leer). normales: 'auto'
+    (como process_one_jam_task: las de Box2D si hay atasco_contacts_full) o
+    'inferidas' (siempre de la geometria, como con los datos viejos)."""
     particles = parse_xy(xy_file)
     dfp = pd.DataFrame.from_dict(particles, orient='index')
     dfp.index.name = 'id'
     dfc = pd.read_csv(contact_file, sep=r'\s+', names=COLS_CONTACTOS,
                       comment='#', dtype=DTYPES_CONTACTOS, engine='c')
     paredes = parse_paredes(xy_file)
-    df = fuerzas_contacto(dfp, dfc, dt, paredes=paredes)
-    nx, ny = normales_contacto(df, paredes)
+    nb, fuente = (None, 'inferidas') if normales == 'inferidas' else \
+        leer_normales_box2d(contact_file, dfc)
+    df = fuerzas_contacto(dfp, dfc, dt, paredes=paredes, normales=nb)
+    if nb is None:
+        nx, ny = normales_contacto(df, paredes)
+    else:
+        nx, ny = nb[:, 0], nb[:, 1]
     df['nx_inf'], df['ny_inf'] = nx, ny
+    print(f"  normales del analisis: {fuente}")
 
     a_ok, b_ok = df['a_valida'].to_numpy(), df['b_valida'].to_numpy()
     Fx, Fy = df['Fx_A'].to_numpy(), df['Fy_A'].to_numpy()
@@ -125,7 +134,7 @@ def resumen_normales(df, full):
     fn = full['Fn'].to_numpy()
     clase = clase_contacto(df)
     tabla = pd.DataFrame({'clase': clase, 'npc': full['npc'], 'ang': ang, 'Fn': fn})
-    print("  Normal inferida vs Box2D (angulo, grados; solo puntos con Fn > 0):")
+    print("  Normal del analisis vs Box2D (angulo, grados; solo puntos con Fn > 0):")
     print(f"    {'clase':22s} {'npc':>3s} {'N':>6s} {'>1 deg':>8s} {'>10 deg':>8s}"
           f" {'max':>8s} {'%Fn mal':>8s}")
     act = tabla[tabla['Fn'] > 0]
@@ -238,6 +247,9 @@ def main():
     ap.add_argument('--r_salida', type=float, default=None,
                     help='radio del orificio, para detectar el arco')
     ap.add_argument('--csv', default=None, help='guarda la comparacion por grano')
+    ap.add_argument('--normales', choices=['auto', 'inferidas'], default='auto',
+                    help="auto: como presion_tensor_arch.py (Box2D si hay "
+                         "atasco_contacts_full); inferidas: siempre de la geometria")
     args = ap.parse_args()
 
     if args.jam:
@@ -255,7 +267,7 @@ def main():
         print(f"=== atasco {tag}")
         ts, dt = leer_tabla(tf)
         full, _ = leer_tabla(ff)
-        tp, df, dfp, dfc = tensor_script(xy, cf, dt)
+        tp, df, dfp, dfc = tensor_script(xy, cf, dt, args.normales)
         resumen_normales(df, full)
         controles_internos(ts, full, args.g)
         d = comparar_granos(ts, tp)

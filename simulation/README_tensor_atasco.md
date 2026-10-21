@@ -49,6 +49,10 @@ Relación con `presion_tensor_arch.py`, que usa `S = sum r F` con el brazo prime
 A sxx = S00,  A sxy = S10,  A syx = S01,  A syy = S11,   P = -(sxx + syy)/2
 ```
 
+## Uso en el análisis
+
+`analysis/3_presion_y_mapas/presion_tensor_arch.py` usa la normal de `atasco_contacts_full_<jam>.dat` cuando el archivo existe y coincide fila por fila con `atasco_contacts_<jam>.dat`. Si no, la infiere de la geometría, igual que antes, así que los datos viejos siguen funcionando. La columna `normales` del resumen por atasco indica cuál se usó: `box2d` o `inferidas (...)`.
+
 ## Comparación
 
 ```bash
@@ -66,6 +70,8 @@ El script hace cuatro comparaciones:
    - virial global contra las paredes.
 4. Con `--r_salida`, calcula ⟨P⟩ pesado por área en el arco y en la ROI con los dos tensores.
 
+Con `--normales auto` (el valor por defecto), el análisis usa las mismas normales que `presion_tensor_arch.py`. Con `--normales inferidas` se fuerza la inferencia geométrica, como con los datos viejos.
+
 ## Validación (2026-10-21)
 
 Prueba local: silo de semiancho 5 y alto 40, con 250 cuadrados (radio 0.5) y 120 discos (radio 0.158). `Radio_salida: 1.1` y `tEsperaAtasco: 5.0`, como en producción. Se analizaron 3 atascos.
@@ -82,4 +88,5 @@ Prueba local: silo de semiancho 5 y alto 40, con 250 cuadrados (radio 0.5) y 120
   - el punto de contacto de Box2D queda a ~0.01 (la piel `b2_polygonRadius`) de un vértice de cada polígono, y desde la posición del punto no se puede saber cuál es la cara de referencia;
   - discos y paredes salen exactos.
 - Las medias ⟨P⟩ por región (arco y ROI) cambiaron ≤ 0.03 %.
+- Con la normal de Box2D (`--normales auto`), el análisis coincide con la simulación en **todos** los granos: error máximo 6e-5 y ninguno por encima del 1 %.
 - Con `tEsperaAtasco: 1.0`, un atasco guardado 1 s después de un unjam que no reanudó el flujo no estaba en reposo (|F + m g| ~ m g). Conviene filtrar los atascos con las columnas de velocidad o con el residuo de equilibrio.
