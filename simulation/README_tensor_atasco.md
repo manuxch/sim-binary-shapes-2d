@@ -65,3 +65,21 @@ El script hace cuatro comparaciones:
    - `A (syx - sxy) = tau`;
    - virial global contra las paredes.
 4. Con `--r_salida`, calcula ⟨P⟩ pesado por área en el arco y en la ROI con los dos tensores.
+
+## Validación (2026-10-21)
+
+Prueba local: silo de semiancho 5 y alto 40, con 250 cuadrados (radio 0.5) y 120 discos (radio 0.158). `Radio_salida: 1.1` y `tEsperaAtasco: 5.0`, como en producción. Se analizaron 3 atascos.
+
+- El formato de `atasco_contacts` coincide con el del binario de producción (cabecera, columnas, `%.6e`). Las trayectorias no son idénticas, porque cambian el compilador y la compilación de Box2D.
+- Tensor del simulador:
+  - equilibrio de fuerzas y torque en cada grano a ~1e-6 de m g;
+  - velocidades ≈ 0;
+  - `A (syx - sxy) = tau` a 4e-8;
+  - virial global a 1e-10.
+- `presion_tensor_arch.py` coincide grano por grano a ~3e-6 en la mediana, que es la precisión de los archivos.
+- Un 2–4 % de los granos tiene errores de más del 10 %, todos por la normal inferida:
+  - en los contactos polígono–polígono esquina contra esquina, la normal queda girada 90°;
+  - el punto de contacto de Box2D queda a ~0.01 (la piel `b2_polygonRadius`) de un vértice de cada polígono, y desde la posición del punto no se puede saber cuál es la cara de referencia;
+  - discos y paredes salen exactos.
+- Las medias ⟨P⟩ por región (arco y ROI) cambiaron ≤ 0.03 %.
+- Con `tEsperaAtasco: 1.0`, un atasco guardado 1 s después de un unjam que no reanudó el flujo no estaba en reposo (|F + m g| ~ m g). Conviene filtrar los atascos con las columnas de velocidad o con el residuo de equilibrio.
