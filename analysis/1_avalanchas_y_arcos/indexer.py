@@ -203,6 +203,10 @@ def parse_params(filepath, folder_path):
             params['r_ratio_nominal'] = nominalizar_ratio_real(params['r_ratio'], ndigits=2)
 
         if params['chi'] is None:
+            if len(grain_defs) >= 2:
+                # Mezcla sin 'Chi_' en el nombre de la carpeta: el chi = 0 de
+                # abajo seria falso. main() lo avisa.
+                SIN_CHI_EN_PATH.append(folder_path)
             params['chi'] = 0.0
         if params['w_salida'] is None and 'Radio_salida' in params:
             params['w_salida'] = params['Radio_salida']
@@ -220,6 +224,8 @@ def parse_params(filepath, folder_path):
 # params.in que no se pudieron leer (ej. [Errno 5] con archivos de OneDrive
 # que no estan descargados en la PC); main() no guarda el indice si hay alguno
 ERRORES_LECTURA = []
+# Mezclas (2 tipos de grano) cuya carpeta no dice 'Chi_X': quedarian con chi = 0
+SIN_CHI_EN_PATH = []
 
 
 def indexar(base_dir):
@@ -294,6 +300,12 @@ def main(base_dir=None):
             continue
         print(f"  {len(df_d)} simulaciones")
         partes.append(df_d)
+    if SIN_CHI_EN_PATH:
+        problemas.append(f"{len(SIN_CHI_EN_PATH)} mezclas sin 'Chi_' en el nombre de la carpeta "
+                         f"(quedarian con chi = 0), ej. {SIN_CHI_EN_PATH[0]}")
+        print("\n[!] Carpetas de mezclas sin 'Chi_X' en el nombre: los scripts leen chi, la relacion de")
+        print("    areas y el orificio del nombre de la carpeta, con el formato Ratio_0p1_Chi_0p2_W_2p0.")
+        print("    Renombrar las carpetas (ver setup/renombrar_carpetas_cluster.sh) y volver a indexar.")
     if problemas:
         print("\n[-] No se guarda el indice: faltarian simulaciones.")
         for p in problemas:
