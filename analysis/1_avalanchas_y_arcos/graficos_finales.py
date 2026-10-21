@@ -749,7 +749,7 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
     df_filtered = df_filtered[(df_filtered['chi'] >= 0) & (df_filtered['chi'] <= 0.4)]
 
     metrics = {
-        'Relacion_Aspecto': r'Arch Aspect Ratio $\langle L\rangle / 2\langle H\rangle$',
+        'Relacion_Aspecto': 'Arch Aspect Ratio',
         'Tortuosidad': 'Arch Tortuosity',
     }
 
