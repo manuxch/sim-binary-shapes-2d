@@ -5,6 +5,7 @@ import json
 
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))  # rutas.py vive en analysis/
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))  # graficar_masa_avalancha.py
 import rutas
 IDX_PATH = rutas.MASTER_INDEX
 AV_PATH = os.path.join(rutas.AVALANCHE_DIR, "resultados_completos_esqueleto.csv")
@@ -94,6 +95,19 @@ def main(idx_path=IDX_PATH, av_path=AV_PATH, solo_con_arco=False):
     cols_idx = [c for c in cols_idx if c in df_idx.columns]
 
     df = pd.merge(df_av, df_idx[cols_idx], on='sim_hash', how='left')
+
+    # Masa por avalancha (misma cuenta que graficar_masa_avalancha.py):
+    #   MB = tamano_big * m_grande;  MT = MB + (total_mix - tamano_big) * m_chico
+    if 'total_mix' in df.columns and 'path' in df_idx.columns:
+        from graficar_masa_avalancha import masas_por_simulacion
+        sims = df_idx[df_idx['sim_hash'].isin(df['sim_hash'].unique())].drop_duplicates('sim_hash')
+        masas = pd.concat([sims[['sim_hash']], sims.apply(masas_por_simulacion, axis=1)], axis=1)
+        print("   Masas por grano: " + ", ".join(f"{k}: {v}" for k, v in
+                                                masas['fuente_masa'].value_counts().items()) + " simulaciones")
+        df = df.merge(masas[['sim_hash', 'm_grande', 'm_chico']], on='sim_hash', how='left')
+        df['masa_big'] = df['tamano_big'] * df['m_grande']
+        df['masa_total'] = df['masa_big'] + ((df['total_mix'] - df['tamano_big']).clip(lower=0)
+                                             * df['m_chico'].fillna(0.0))
     df = df[df['chi'] <= 0.4].copy()
 
     for col, default in [
@@ -120,6 +134,10 @@ def main(idx_path=IDX_PATH, av_path=AV_PATH, solo_con_arco=False):
     extra = {}
     if 'total_mix' in df.columns:
         extra = dict(ST_mean=('total_mix', 'mean'), ST_sem=('total_mix', 'sem'))
+    if 'masa_big' in df.columns:
+        # MB: masa de granos grandes por avalancha; MT: masa total (grandes + chicos)
+        extra.update(MB_mean=('masa_big', 'mean'), MB_sem=('masa_big', 'sem'),
+                     MT_mean=('masa_total', 'mean'), MT_sem=('masa_total', 'sem'))
     res = (
         df.groupby(group_cols, dropna=False)
         .agg(

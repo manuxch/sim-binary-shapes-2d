@@ -206,6 +206,7 @@ def plot_disco_vs_area_ratio(df: pd.DataFrame):
             **ERRORBAR_KW,
         )
 
+    plt.xlim(left=0.0)
     plt.xlabel(r"Nominal Area Ratio $R_{\rm a}$")
     plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
 
@@ -404,16 +405,23 @@ def plot_sweeps_by_system(
         save_plot(nombre)
 
 
-def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15, total: bool = False):
+def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15, total: bool = False, masa: bool = False):
     """5a/5b: tamano medio de avalancha normalizado por el del sistema puro.
     total=False: <s> = granos grandes por avalancha (S_mean).
     total=True:  <s_T> = todos los granos, grandes + chicos (ST_mean); solo 5b,
-                 archivo 5b-matrix-normalized-total."""
-    mean_col, sem_col = ('ST_mean', 'ST_sem') if total else ('S_mean', 'S_sem')
+                 archivo 5b-matrix-normalized-total.
+    masa=True:   lo mismo en masa (MB_mean / MT_mean de flow_analysis.py); solo 5b,
+                 archivos 5b-matrix-normalized-mass y 5b-matrix-normalized-total-mass.
+                 Para los grandes, M/M0 = s/s0 (la masa del grano grande se cancela)."""
+    if masa:
+        mean_col, sem_col = ('MT_mean', 'MT_sem') if total else ('MB_mean', 'MB_sem')
+    else:
+        mean_col, sem_col = ('ST_mean', 'ST_sem') if total else ('S_mean', 'S_sem')
     if mean_col not in df.columns:
         print(f"  [!] {mean_col} no esta en estadisticas_flujo_agregadas.csv: correr flow_analysis.py de nuevo.")
         return
-    print(f"  -> Plotting 5{'b total' if total else 'a/b'}: Normalized Effects (R_a ~ {target_ar})...")
+    print(f"  -> Plotting 5{'b' if total or masa else 'a/b'}{' total' if total else ''}{' mass' if masa else ''}: "
+          f"Normalized Effects (R_a ~ {target_ar})...")
 
     df_mix = df[df['chi'] > 0].copy()
     if df_mix.empty:
@@ -431,8 +439,9 @@ def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15, total: boo
 
     df_norm['log_S_norm'] = np.log((df_norm[mean_col] / df_norm['S0']) + 1)
     df_norm['log_S_norm_err'] = df_norm[sem_col] / (df_norm[mean_col] + df_norm['S0'])
-    ylabel = (r"$\ln(\langle s_{\rm T} \rangle / \langle s_{\rm T,0} \rangle + 1)$" if total
-              else r"$\ln(\langle s \rangle / \langle s_0 \rangle + 1)$")
+    v = 'M' if masa else 's'
+    ylabel = (rf"$\ln(\langle {v}_{{\rm T}} \rangle / \langle {v}_{{\rm T,0}} \rangle + 1)$" if total
+              else rf"$\ln(\langle {v} \rangle / \langle {v}_0 \rangle + 1)$")
 
     def draw(sistemas: List[str], filename: str):
         plt.figure()
@@ -460,14 +469,14 @@ def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15, total: boo
 
         plt.xlabel(r"Concentration $\chi$")
         plt.ylabel(ylabel)
-        if not total:
+        if not total and not masa:
             plt.ylim(0.4, 2.5)
         plt.legend(loc='upper left')
         save_plot(filename)
 
     matriz = ['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Oct(G)-Disco(C)']
-    if total:
-        draw(matriz, "5b-matrix-normalized-total")
+    if total or masa:
+        draw(matriz, "5b-matrix-normalized" + ("-total" if total else "") + ("-mass" if masa else ""))
         return
     draw(['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)', 'Disco(G)-Tri(C)', 'Disco(G)-Oct(C)'], "5a-additive-normalized")
     draw(matriz, "5b-matrix-normalized")
@@ -822,6 +831,8 @@ def main():
     plot_sweeps_by_system(df, sistemas_meta, zoom=True, xlim=(0.05, 0.15))
     plot_geometric_effects(df)
     plot_geometric_effects(df, total=True)
+    plot_geometric_effects(df, masa=True)
+    plot_geometric_effects(df, total=True, masa=True)
     plot_geometric_effects_raw(df)
     plot_geometric_effects_linear(df)
 
