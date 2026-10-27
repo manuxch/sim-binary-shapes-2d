@@ -30,7 +30,7 @@ COLOR_ARCO_RELLENO = '#FFC864'    # naranja suave
 COLOR_ARCO_LINEA = 'blue'
 # Linea que une los granos del arco (sin marcadores en los centros). Los granos
 # del arco van sin contorno: con el borde grueso no se distinguia el grano chico.
-GROSOR_LINEA_ARCO = 1.5
+GROSOR_LINEA_ARCO = 0.75   # se cambia con --grosor_arco
 
 # =============================================================================
 # FUNCIONES DE PARSEO Y DETECCIÓN
@@ -124,7 +124,8 @@ def detectar_arco_primario(G, particles, params):
 # GENERACIÓN DE IMAGEN
 # =============================================================================
 def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg',
-                            fuerzas='arco', escala_fuerza=ESCALA_GROSOR_FUERZA):
+                            fuerzas='arco', escala_fuerza=ESCALA_GROSOR_FUERZA,
+                            grosor_arco=GROSOR_LINEA_ARCO):
     """estilo='fuerzas': fuerzas coloreadas con inferno, granos sin relleno (original).
     estilo='simple': granos rellenos con un color suave, fuerzas de un solo color.
     fuerzas='arco': solo los contactos en los que participa un grano del arco;
@@ -239,7 +240,7 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg',
             arch_y.append(particles[v]['pos'][1])
             
         # Dibujamos la línea azul principal quebrada
-        ax.plot(arch_x, arch_y, color=COLOR_ARCO_LINEA, lw=GROSOR_LINEA_ARCO, zorder=5, alpha=0.6, solid_capstyle='round')
+        ax.plot(arch_x, arch_y, color=COLOR_ARCO_LINEA, lw=grosor_arco, zorder=5, alpha=0.6, solid_capstyle='round')
 
     # 3. Dibujar Fuerzas (también pasando por el punto de contacto promediado)
     f_max_scale = grouped_contacts['f_norm'].quantile(0.95) if not grouped_contacts.empty else 1.0
@@ -296,7 +297,10 @@ if __name__ == "__main__":
                     help="arco: solo contactos de los granos del arco; todas: toda la red de fuerzas")
     ap.add_argument('--escala_fuerza', type=float, default=ESCALA_GROSOR_FUERZA,
                     help=f"grosor de linea por unidad de fuerza (default {ESCALA_GROSOR_FUERZA})")
+    ap.add_argument('--grosor_arco', type=float, default=GROSOR_LINEA_ARCO,
+                    help=f"grosor de la linea azul del arco (default {GROSOR_LINEA_ARCO})")
     args = ap.parse_args()
     for j in args.jam_id:
         graficar_arco_y_fuerzas(args.sim, f"{int(j):05d}", estilo=args.estilo, formato=args.formato,
-                                fuerzas=args.fuerzas, escala_fuerza=args.escala_fuerza)
+                                fuerzas=args.fuerzas, escala_fuerza=args.escala_fuerza,
+                                grosor_arco=args.grosor_arco)
