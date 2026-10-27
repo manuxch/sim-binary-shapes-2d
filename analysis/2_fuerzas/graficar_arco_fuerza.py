@@ -24,6 +24,10 @@ COLOR_BORDE_GRANO = '#7F8C99'
 COLOR_FUERZA = '#4D4D4D'          # gris oscuro
 COLOR_ARCO_RELLENO = '#FFC864'    # naranja suave
 COLOR_ARCO_LINEA = 'blue'
+# Linea que une los granos del arco y marcadores en sus centros. Los granos
+# del arco van sin contorno: con el borde grueso no se distinguia el grano chico.
+GROSOR_LINEA_ARCO = 1.5
+TAMANO_CENTRO_ARCO = 12
 
 # =============================================================================
 # FUNCIONES DE PARSEO Y DETECCIÓN
@@ -196,10 +200,10 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg')
             p = particles[pid]
             if simple:
                 # opaco: si no, se mezcla con el relleno de fondo
-                kw = dict(fc=COLOR_ARCO_RELLENO, ec=COLOR_ARCO_LINEA, lw=2, zorder=2)
+                kw = dict(fc=COLOR_ARCO_RELLENO, ec='none', zorder=2)
             else:
                 c = 'orange' if p['type'] == 0 else 'lightgreen'
-                kw = dict(color=c, alpha=0.5, ec='blue', lw=2, zorder=2)
+                kw = dict(fc=c, alpha=0.5, ec='none', zorder=2)
             if p['shape'] == 'Disco':
                 ax.add_patch(Circle(p['pos'], p['r'], **kw))
             else:
@@ -228,12 +232,12 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg')
             arch_y.append(particles[v]['pos'][1])
             
         # Dibujamos la línea azul principal quebrada
-        ax.plot(arch_x, arch_y, color=COLOR_ARCO_LINEA, lw=3.5, zorder=5, alpha=0.6, solid_capstyle='round')
+        ax.plot(arch_x, arch_y, color=COLOR_ARCO_LINEA, lw=GROSOR_LINEA_ARCO, zorder=5, alpha=0.6, solid_capstyle='round')
         
         # Agregamos un marcador redondo SOLO en los centros (queda más prolijo)
         cx = [particles[pid]['pos'][0] for pid in arco_path]
         cy = [particles[pid]['pos'][1] for pid in arco_path]
-        ax.scatter(cx, cy, color=COLOR_ARCO_LINEA, s=40, zorder=6)
+        ax.scatter(cx, cy, color=COLOR_ARCO_LINEA, s=TAMANO_CENTRO_ARCO, zorder=6)
 
     # 3. Dibujar Fuerzas (también pasando por el punto de contacto promediado)
     f_max_scale = grouped_contacts['f_norm'].quantile(0.95) if not grouped_contacts.empty else 1.0
