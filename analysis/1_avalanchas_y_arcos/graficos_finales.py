@@ -688,8 +688,8 @@ def plot_arch_geometry_deep_dive(df_stats: pd.DataFrame):
             color=color_map[sys_name], scatter_kws={'alpha': 0.05, 's': 2},
             line_kws={'lw': 2.5},
         )
-    plt.xlabel("Orifice Span ($L$)")
-    plt.ylabel("Arch Length ($s$)")
+    plt.xlabel(r"Arch Span $L$")
+    plt.ylabel(r"Arch Length $\ell$")
     plt.legend(loc='upper left')
     save_plot(f"12-arch-length-vs-span-chi-{target_chi}")
 
