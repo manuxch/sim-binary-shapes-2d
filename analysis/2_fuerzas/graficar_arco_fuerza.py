@@ -141,7 +141,7 @@ def area_particula(p):
 
 def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg',
                             fuerzas='arco', escala_fuerza=ESCALA_GROSOR_FUERZA,
-                            grosor_arco=GROSOR_LINEA_ARCO, colores='especie'):
+                            grosor_arco=GROSOR_LINEA_ARCO, colores='especie', salida=None):
     """estilo='fuerzas': fuerzas coloreadas con inferno, granos sin relleno (original).
     estilo='simple': granos rellenos con un color suave, fuerzas de un solo color.
     fuerzas='arco': solo los contactos en los que participa un grano del arco;
@@ -303,7 +303,9 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg',
     ax.axis('off')
 
     sufijo = '_simple' if simple else ''
-    output_path = os.path.join(frames_dir, '..', f'arco_y_fuerzas_contacto_{jam_id}{sufijo}.{formato}')
+    # Sin '..' en la ruta: en carpetas de OneDrive (/mnt/c) daba [Errno 22]
+    output_path = os.path.join(salida or sim_folder, f'arco_y_fuerzas_contacto_{jam_id}{sufijo}.{formato}')
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     fig.savefig(output_path, format=formato, bbox_inches='tight', transparent=False, dpi=300)
     plt.close(fig)
     print(f"✅ Imagen guardada con éxito en:\n   {output_path}")
@@ -326,8 +328,10 @@ if __name__ == "__main__":
                     help=f"grosor de la linea azul del arco (default {GROSOR_LINEA_ARCO})")
     ap.add_argument('--colores', choices=['especie', 'arco'], default='especie',
                     help="especie: granos del arco grande rojo, chico azul (como los videos); arco: arco naranja/verde (anterior)")
+    ap.add_argument('--salida', default=None,
+                    help="carpeta donde guardar la imagen (default: la de la simulacion)")
     args = ap.parse_args()
     for j in args.jam_id:
         graficar_arco_y_fuerzas(args.sim, f"{int(j):05d}", estilo=args.estilo, formato=args.formato,
                                 fuerzas=args.fuerzas, escala_fuerza=args.escala_fuerza,
-                                grosor_arco=args.grosor_arco, colores=args.colores)
+                                grosor_arco=args.grosor_arco, colores=args.colores, salida=args.salida)
