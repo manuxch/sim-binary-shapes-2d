@@ -31,12 +31,11 @@ COLOR_RELLENO_GRANO = '#DCE3EA'   # gris azulado claro
 COLOR_BORDE_GRANO = '#7F8C99'
 COLOR_FUERZA = '#4D4D4D'          # gris oscuro
 COLOR_ARCO_RELLENO = '#FFC864'    # naranja suave (solo con --colores arco)
-# Con --colores especie (default) los granos van con los colores de los videos
-# de la simulacion: grande (poligono) rojo, chico (disco) azul. Los del arco
-# opacos y el resto transparentes, asi se destaca el arco.
+# Con --colores especie (default) los granos DEL ARCO van con los colores de
+# los videos de la simulacion: grande (poligono) rojo, chico (disco) azul. El
+# resto queda como antes (sin relleno).
 COLOR_GRANDE = '#D62728'          # rojo
 COLOR_CHICO = '#1F77B4'           # azul
-ALPHA_FONDO = 0.25
 ALPHA_ARCO = 0.9
 COLOR_ARCO_LINEA = 'black'        # negra: azul se confundia con los granos chicos
 # Linea que une los granos del arco (sin marcadores en los centros). Los granos
@@ -147,7 +146,7 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg',
     estilo='simple': granos rellenos con un color suave, fuerzas de un solo color.
     fuerzas='arco': solo los contactos en los que participa un grano del arco;
     fuerzas='todas': la red de fuerzas de todo el atasco.
-    colores='especie': grande rojo, chico azul (como los videos);
+    colores='especie': granos del arco grande rojo, chico azul (como los videos);
     colores='arco': colores anteriores (arco naranja/verde)."""
     simple = (estilo == 'simple')
     frames_dir = glob.glob(os.path.join(sim_folder, "frames_*"))
@@ -223,14 +222,10 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg',
     fc, ec, lw_borde = ((COLOR_RELLENO_GRANO, COLOR_BORDE_GRANO, GROSOR_BORDE_SIMPLE) if simple
                         else ('none', '#CCCCCC', GROSOR_BORDE_FUERZAS))
     for pid, p in particles.items():
-        if por_especie:
-            kw = dict(fc=mpl.colors.to_rgba(color_de(p), ALPHA_FONDO), ec=color_de(p), lw=lw_borde, zorder=1)
-        else:
-            kw = dict(fc=fc, ec=ec, lw=lw_borde, zorder=1)
         if p['shape'] == 'Disco':
-            ax.add_patch(Circle(p['pos'], p['r'], **kw))
+            ax.add_patch(Circle(p['pos'], p['r'], fc=fc, ec=ec, lw=lw_borde, zorder=1))
         else:
-            ax.add_patch(pltPolygon(p['coords'], **kw))
+            ax.add_patch(pltPolygon(p['coords'], fc=fc, ec=ec, lw=lw_borde, zorder=1))
 
     # 2. Dibujar Arco Detectado (Resaltado)
     if arco_path:
@@ -330,7 +325,7 @@ if __name__ == "__main__":
     ap.add_argument('--grosor_arco', type=float, default=GROSOR_LINEA_ARCO,
                     help=f"grosor de la linea azul del arco (default {GROSOR_LINEA_ARCO})")
     ap.add_argument('--colores', choices=['especie', 'arco'], default='especie',
-                    help="especie: grande rojo, chico azul (como los videos); arco: arco naranja/verde (anterior)")
+                    help="especie: granos del arco grande rojo, chico azul (como los videos); arco: arco naranja/verde (anterior)")
     args = ap.parse_args()
     for j in args.jam_id:
         graficar_arco_y_fuerzas(args.sim, f"{int(j):05d}", estilo=args.estilo, formato=args.formato,
