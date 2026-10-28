@@ -261,10 +261,14 @@ def plot_disco_vs_area_ratio_norm(df: pd.DataFrame):
         )
 
     plt.yscale('log')
-    # numeros comunes en el eje (1, 2, 3...) en lugar de 2x10^0
-    fmt = plt.FuncFormatter(lambda v, _: f"{v:g}")
-    plt.gca().yaxis.set_major_formatter(fmt)
-    plt.gca().yaxis.set_minor_formatter(fmt)
+    # Etiquetas en numeros comunes y separadas (antes salian todas las de
+    # 0.6, 0.7, 0.8, 0.9 pegadas); las demas marcas quedan sin numero.
+    ax = plt.gca()
+    lo, hi = ax.get_ylim()
+    ticks = [t for t in (0.2, 0.3, 0.5, 0.7, 1, 2, 3, 5, 7, 10, 20, 30, 50) if lo <= t <= hi]
+    ax.yaxis.set_major_locator(plt.FixedLocator(ticks))
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:g}"))
+    ax.yaxis.set_minor_formatter(plt.NullFormatter())
     plt.xlim(left=0.0)
     plt.xlabel(r"Nominal Area Ratio $R_{\rm a}$")
     plt.ylabel(r"$\langle s \rangle / \langle s \rangle_0$")
