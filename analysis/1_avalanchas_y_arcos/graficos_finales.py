@@ -215,6 +215,65 @@ def plot_disco_vs_area_ratio(df: pd.DataFrame):
     save_plot("2-discog-discoc-vs-area-ratio")
 
 
+def plot_disco_vs_area_ratio_norm(df: pd.DataFrame):
+    """Variante de la figura 2: <s>/<s>_0 (sistema puro de discos, mismo
+    orificio) en escala logaritmica, con la referencia en 1, en lugar de
+    ln(<s> + 1). Error: S_sem / <s>_0 (el del puro no se propaga, como en
+    las figuras normalizadas)."""
+    print("  -> Plotting 2B: Disco(G)-Disco(C) vs Area Ratio, <s>/<s>_0 en log...")
+
+    df_sys = df[df['sistema'] == 'Disco(G)-Disco(C)'].copy()
+    if df_sys.empty:
+        return
+
+    main_dd = df_sys['D_d_sq'].value_counts().idxmax()
+    df_sys = df_sys[df_sys['D_d_sq'] == main_dd]
+
+    s0, _ = get_pure_ref(df, 'Disco(G)-Disco(C)', main_dd, 'S_mean')
+    if s0 is None:
+        print("     [!] sin sistema puro de discos: no se puede normalizar")
+        return
+    print(f"     <s>_0 = {s0:.2f}; <s> minimo en todo el csv = {df['S_mean'].min():.2f}, "
+          f"en discos-discos = {df_sys['S_mean'].min():.2f}")
+
+    plt.figure()
+    plt.axhline(y=1.0, **REF_LINE_KW, label=r'$\chi = 0$ (Pure)')
+
+    target_chis = [0.01, 0.1, 0.14, 0.2]
+    colors, markers = SEQ_STYLE(len(target_chis))
+
+    for chi, color, marker in zip(target_chis, colors, markers):
+        grp = df_sys[np.isclose(df_sys['chi'], chi, atol=0.005)].sort_values(AR_COL)
+        if grp.empty:
+            continue
+
+        plot_data = (
+            grp.groupby(AR_COL, dropna=False)
+               .agg(S_mean=('S_mean', 'mean'), S_sem=('S_sem', 'mean'))
+               .reset_index()
+               .sort_values(AR_COL)
+        )
+
+        plt.errorbar(
+            plot_data[AR_COL], plot_data['S_mean'] / s0, yerr=plot_data['S_sem'] / s0,
+            fmt=f'{marker}-', color=color, label=rf'$\chi = {chi}$',
+            **ERRORBAR_KW,
+        )
+
+    plt.yscale('log')
+    # numeros comunes en el eje (1, 2, 3...) en lugar de 2x10^0
+    fmt = plt.FuncFormatter(lambda v, _: f"{v:g}")
+    plt.gca().yaxis.set_major_formatter(fmt)
+    plt.gca().yaxis.set_minor_formatter(fmt)
+    plt.xlim(left=0.0)
+    plt.xlabel(r"Nominal Area Ratio $R_{\rm a}$")
+    plt.ylabel(r"$\langle s \rangle / \langle s \rangle_0$")
+
+    plt.legend(loc='best')
+
+    save_plot("2-discog-discoc-vs-area-ratio_B")
+
+
 def _puntos_de(curvas, n_seg=30):
     """Puntos de las curvas (R_a, x, y, err): los datos, los extremos de las
     barras de error y puntos intermedios sobre las lineas que los unen."""
@@ -827,6 +886,7 @@ def main():
     # Flujo / avalanchas
     # plot_puros_vs_orificio(df)
     plot_disco_vs_area_ratio(df)
+    plot_disco_vs_area_ratio_norm(df)
     plot_sweeps_by_system(df, sistemas_meta)
     plot_sweeps_by_system(df, sistemas_meta, zoom=True, xlim=(0.05, 0.15))
     plot_geometric_effects(df)
