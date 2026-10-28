@@ -643,8 +643,13 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
         return
 
     # --- Plot 6: Composición ---
-    # Filtrar el DataFrame para conservar solo los valores de chi entre 0 y 0.4
-    df_filtered = df_mix[(df_mix['chi'] >= 0) & (df_mix['chi'] <= 0.4)].copy()
+    # Fraccion en NUMERO de granos chicos en el arco. Todas las curvas con el
+    # mismo R_a (el filtro estandar deja entrar R_a de 0.05 a 0.25 en los
+    # poligonos, y la referencia homogenea depende de R_a).
+    ar_comp = 0.1
+    df_comp = df_filtered[(df_filtered['chi'] > 0)
+                          & np.isclose(df_filtered[AR_COL].astype(float), ar_comp, atol=0.03)]
+    df_filtered = df_comp[(df_comp['chi'] >= 0) & (df_comp['chi'] <= 0.4)].copy()
     
     df_filtered['frac_arco'] = df_filtered['Particulas_Tipo_1'] / df_filtered['Total_Particulas_Arco']
     plt.figure()
@@ -661,15 +666,19 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
             label=CFG.english_labels.get(sys_name, sys_name), **ERRORBAR_KW,
         )
 
-    # Ajustar la línea de referencia homogénea para que vaya de 0 a 0.4
-    plt.plot([0, 0.5], [0, 0.5], **REF_LINE_KW, label='Homogeneous')
+    # Referencia de mezcla homogenea: chi es fraccion de AREA, y en numero
+    # n_S = (chi/R_a) / (chi/R_a + 1 - chi) = chi / (chi + R_a (1 - chi)).
+    # (Antes era la recta n_S = chi, que compara numero contra area.)
+    chi_ref = np.linspace(0, 0.45, 200)
+    plt.plot(chi_ref, chi_ref / (chi_ref + ar_comp * (1 - chi_ref)), **REF_LINE_KW,
+             label=rf'Homogeneous ($R_{{\rm a}} = {ar_comp:g}$)')
     
     # Opcional: fijar explícitamente los límites del eje x
     plt.xlim(0, 0.45)
     
     plt.xlabel(r"Global Concentration $\chi$")
-    plt.ylabel(r"Arch Additive Fraction $\chi_{arch}$")
-    plt.legend(loc='upper left')
+    plt.ylabel(r"Arch Small-Grain Fraction $n_{\rm S}$")
+    plt.legend(loc='lower right')
     save_plot("6-arch-composition")
 
     # --- Filtro chi = 0.2 ---
