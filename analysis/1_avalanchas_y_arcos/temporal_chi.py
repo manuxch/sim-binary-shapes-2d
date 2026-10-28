@@ -252,7 +252,11 @@ def _xlim_intervalo(ax):
 def figura_comparativa(df_idx, casos, out, normalizar=False):
     """chi_eff(t) de varias simulaciones en un mismo grafico (solo lineas),
     cada una con su chi nominal como linea discontinua del mismo color.
-    casos: lista de sim_hash (se aceptan prefijos)."""
+    casos: lista de sim_hash (se aceptan prefijos), o ['todos'] para todas las
+    simulaciones que quedan despues de --sistema / --chi / --area_ratio."""
+    if list(casos) == ['todos']:
+        casos = df_idx['sim_hash'].astype(str).tolist()
+        print(f"--casos todos: {len(casos)} simulaciones")
     _estilo()
     fig, ax = plt.subplots(figsize=(10, 5))
     y_max = 0.0
@@ -338,7 +342,8 @@ def main():
     parser.add_argument('--workers', type=int, default=CPU_CORES)
     parser.add_argument('--casos', nargs='+', default=None,
                         help="sim_hash (o prefijos) para UNA figura comparativa con todas las curvas; "
-                             "no genera las figuras por simulacion")
+                             "'todos' = las que quedan con --sistema/--chi/--area_ratio. "
+                             "No genera las figuras por simulacion")
     parser.add_argument('--normalizar', action='store_true',
                         help="figura comparativa con chi_eff / chi nominal (referencia en 1)")
     parser.add_argument('--t_min', type=float, default=None,
