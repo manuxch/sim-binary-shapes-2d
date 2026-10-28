@@ -625,6 +625,43 @@ def plot_geometric_effects_linear(df: pd.DataFrame, target_ar: float = 0.15):
 # GRÁFICOS DE ARCOS
 # =============================================================================
 
+def plot_arch_composition_B(df_arcos: pd.DataFrame, matrix_systems: List[str], ar_comp: float = 0.1):
+    """Variante de la Fig 6 (6-arch-composition_B): fraccion en NUMERO de
+    granos chicos en el arco, todas las curvas con el mismo R_a, y la
+    referencia de mezcla homogenea en numero. chi es fraccion de AREA:
+        n_S = (chi/R_a) / (chi/R_a + 1 - chi) = chi / (chi + R_a (1 - chi)).
+    En la Fig 6 original la referencia es n_S = chi (numero contra area) y el
+    filtro estandar deja entrar R_a de 0.05 a 0.25 en los poligonos."""
+    df = df_arcos[(df_arcos['chi'] > 0) & (df_arcos['chi'] <= 0.4)
+                  & np.isclose(df_arcos[AR_COL].astype(float), ar_comp, atol=0.03)].copy()
+    if df.empty:
+        print(f"  [!] Fig 6B: no hay arcos con R_a ~ {ar_comp}")
+        return
+    df['frac_arco'] = df['Particulas_Tipo_1'] / df['Total_Particulas_Arco']
+    plt.figure()
+    for sys_name in matrix_systems:
+        group = df[df['sistema'] == sys_name]
+        if group.empty:
+            continue
+        grp = group.groupby('chi')['frac_arco'].agg(['mean', 'std', 'count']).reset_index()
+        grp['sem'] = grp['std'] / np.sqrt(grp['count'])
+        color, marker = CFG.system_style.get(sys_name, ('black', 'o'))
+        plt.errorbar(
+            grp['chi'], grp['mean'], yerr=grp['sem'],
+            fmt=f'{marker}-', color=color,
+            label=CFG.english_labels.get(sys_name, sys_name), **ERRORBAR_KW,
+        )
+
+    chi_ref = np.linspace(0, 0.45, 200)
+    plt.plot(chi_ref, chi_ref / (chi_ref + ar_comp * (1 - chi_ref)), **REF_LINE_KW,
+             label=rf'Homogeneous ($R_{{\rm a}} = {ar_comp:g}$)')
+    plt.xlim(0, 0.45)
+    plt.xlabel(r"Global Concentration $\chi$")
+    plt.ylabel(r"Arch Small-Grain Fraction $n_{\rm S}$")
+    plt.legend(loc='lower right')
+    save_plot("6-arch-composition_B")
+
+
 def plot_arch_analysis(df_stats: pd.DataFrame):
     """Plot 6, 9 y 10: composición, tortuosidad y tamaños de avalancha."""
     if not os.path.exists(CFG.arcos_path):
@@ -643,13 +680,8 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
         return
 
     # --- Plot 6: Composición ---
-    # Fraccion en NUMERO de granos chicos en el arco. Todas las curvas con el
-    # mismo R_a (el filtro estandar deja entrar R_a de 0.05 a 0.25 en los
-    # poligonos, y la referencia homogenea depende de R_a).
-    ar_comp = 0.1
-    df_comp = df_filtered[(df_filtered['chi'] > 0)
-                          & np.isclose(df_filtered[AR_COL].astype(float), ar_comp, atol=0.03)]
-    df_filtered = df_comp[(df_comp['chi'] >= 0) & (df_comp['chi'] <= 0.4)].copy()
+    # Filtrar el DataFrame para conservar solo los valores de chi entre 0 y 0.4
+    df_filtered = df_mix[(df_mix['chi'] >= 0) & (df_mix['chi'] <= 0.4)].copy()
     
     df_filtered['frac_arco'] = df_filtered['Particulas_Tipo_1'] / df_filtered['Total_Particulas_Arco']
     plt.figure()
@@ -666,20 +698,18 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
             label=CFG.english_labels.get(sys_name, sys_name), **ERRORBAR_KW,
         )
 
-    # Referencia de mezcla homogenea: chi es fraccion de AREA, y en numero
-    # n_S = (chi/R_a) / (chi/R_a + 1 - chi) = chi / (chi + R_a (1 - chi)).
-    # (Antes era la recta n_S = chi, que compara numero contra area.)
-    chi_ref = np.linspace(0, 0.45, 200)
-    plt.plot(chi_ref, chi_ref / (chi_ref + ar_comp * (1 - chi_ref)), **REF_LINE_KW,
-             label=rf'Homogeneous ($R_{{\rm a}} = {ar_comp:g}$)')
+    # Ajustar la línea de referencia homogénea para que vaya de 0 a 0.4
+    plt.plot([0, 0.5], [0, 0.5], **REF_LINE_KW, label='Homogeneous')
     
     # Opcional: fijar explícitamente los límites del eje x
     plt.xlim(0, 0.45)
     
     plt.xlabel(r"Global Concentration $\chi$")
-    plt.ylabel(r"Arch Small-Grain Fraction $n_{\rm S}$")
-    plt.legend(loc='lower right')
+    plt.ylabel(r"Arch Additive Fraction $\chi_{arch}$")
+    plt.legend(loc='upper left')
     save_plot("6-arch-composition")
+
+    plot_arch_composition_B(df_arcos[df_arcos['sistema'].isin(matrix_systems)], matrix_systems)
 
     # --- Filtro chi = 0.2 ---
     target_chi = 0.2
