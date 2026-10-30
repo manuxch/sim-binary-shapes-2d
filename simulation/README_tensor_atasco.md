@@ -76,6 +76,19 @@ Con `--normales auto` (el valor por defecto), el análisis usa las mismas normal
 
 Prueba local: silo de semiancho 5 y alto 40, con 250 cuadrados (radio 0.5) y 120 discos (radio 0.158). `Radio_salida: 1.1` y `tEsperaAtasco: 5.0`, como en producción. Se analizaron 3 atascos.
 
+Para repetirla (unos 3–4 minutos):
+
+```bash
+cd simulation && make && cd ..
+bash run_scripts/prueba_tensor.sh
+```
+
+- Los parámetros están en `run_scripts/params_prueba_tensor.in`, con la semilla fija.
+- El script corre la simulación en `prueba_tensor/`, que está en el `.gitignore`.
+- Después corre la comparación dos veces: con `--normales auto` y con `--normales inferidas`.
+- Con `EO_SILO=/ruta/a/eo-silo` se usa otro ejecutable. Con `PYTHON=...` se usa otro intérprete, que necesita numpy, pandas y networkx.
+- Los números pueden variar un poco con otro compilador o con otra compilación de Box2D, porque cambian las trayectorias. Las conclusiones no cambian.
+
 - El formato de `atasco_contacts` coincide con el del binario de producción (cabecera, columnas, `%.6e`). Las trayectorias no son idénticas, porque cambian el compilador y la compilación de Box2D.
 - Tensor del simulador:
   - equilibrio de fuerzas y torque en cada grano a ~1e-6 de m g;

@@ -5,3 +5,4 @@ estres.pdf
 *.out
 *.toc
 *.xdv
+*.synctex.gz
